@@ -85,10 +85,15 @@ manually (or `cookieRefreshEnabled: false`, the default).
 ## Config (`config.json`)
 
 - `username` — your Microsoft **email** (not the gamertag), `auth: "microsoft"`.
-- `version` — protocol to connect with. `"1.21.11"` (protocol 774) is supported by
-  current Mineflayer/`minecraft-data` and matches the mod. If login fails on
-  version, make sure your install is current (`npm i mineflayer@latest`) or drop to
-  a nearby supported release like `"1.21.8"` — Hypixel accepts a range via ViaVersion.
+- `version` — protocol to connect with. **Use `"1.20.1"`** (the default). Mineflayer
+  has a known bug on protocols above 1.20.1 — it dies silently in the
+  login→configuration handoff on Hypixel
+  ([mineflayer#3775](https://github.com/PrismarineJS/mineflayer/issues/3775);
+  telltale sign: `[login] success` → `socketClosed`, while the account lingers
+  online because the server is still waiting for the client). Hypixel's server
+  runs the latest version but accepts 1.8–1.21.x clients via ViaVersion, so
+  connecting as 1.20.1 changes nothing about the Bazaar. If 1.20.1 fails too,
+  try `"1.18.2"` or `"1.8.9"`.
 - `warpCommand` — how to reach SkyBlock after login (default `skyblock`).
 - `dryRun` — **`true` = observe (safe), `false` = live trading.**
 - `strategy` — the brain knobs (order slots, margins, sizing, volume floors …),

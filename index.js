@@ -31,7 +31,9 @@ const bot = {
   username: raw.username, // your Microsoft email
   auth: raw.auth ?? 'microsoft',
   // "auto" (or false) → let Mineflayer negotiate the version from the server ping.
-  version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.21.11'),
+  // DEFAULT 1.20.1: mineflayer breaks in the 1.20.2+ configuration phase on
+  // Hypixel (mineflayer#3775); Hypixel accepts 1.20.1 clients via ViaVersion.
+  version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.20.1'),
   warpCommand: raw.warpCommand ?? 'skyblock',
   webhookUrl: raw.webhookUrl ?? '',
   webhookStatusMin: raw.webhookStatusMin ?? 30,
@@ -154,14 +156,14 @@ function start() {
     const delay = Math.min(60, 15 * Math.min(attempts, 4));
     console.log(`disconnected: ${why} — reconnecting in ${delay}s`);
     // Diagnose by HOW FAR we got.
-    if (why === 'socketClosed' && loginSucceeded) {
-      // Auth/version/IP are all fine — Hypixel dropped us AFTER login, in the
-      // configuration phase (before spawning). That's Hypixel's own gate.
-      console.log('  ⚠ login SUCCEEDED, then dropped during the configuration phase (before spawn).');
-      console.log(`    (reached configuration: ${reachedConfig}) — this is Hypixel's gate, NOT auth/version/IP. Try:`);
-      console.log('    1) Join Hypixel ONCE from a real Minecraft client on this account & accept the rules.');
-      console.log('    2) Try "version":"auto" or "1.21.8" — some Hypixel config-phase packets trip newer builds.');
-      console.log('    3) If your OTHER Mineflayer bots reach spawn on this account, tell Claude what version/options they use.');
+    if (why === 'socketClosed' && loginSucceeded && !reachedConfig) {
+      // KNOWN MINEFLAYER BUG (#3775): on protocols >1.20.1 the client dies
+      // silently in the login→configuration handoff. Telltale: the account
+      // lingers ONLINE on Hypixel after we "disconnect" — the server is still
+      // waiting for our acknowledgement; nobody kicked us, our side died.
+      console.log('  ⚠ mineflayer bug #3775: versions >1.20.1 break in the configuration handoff on Hypixel.');
+      console.log('    FIX: set "version": "1.20.1" in config.json — Hypixel translates old client');
+      console.log('    versions server-side (ViaVersion); the Bazaar works identically.');
     } else if (why === 'socketClosed' && attempts >= 2) {
       console.log('  ⚠ socketClosed before login success — refused at handshake (version/IP/anti-bot).');
     }

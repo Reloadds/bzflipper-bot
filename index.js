@@ -90,13 +90,16 @@ function start() {
   }
 
   // Deep diagnostics: see exactly how far the handshake gets and the raw errors.
+  let loginSucceeded = false, reachedConfig = false, packetCount = 0;
   mc._client?.on('error', (e) => console.log('  client error:', e.code || '', e.message));
-  if (bot.logPackets) {
-    let n = 0;
-    mc._client?.on('packet', (data, meta) => {
-      if (n++ < 40) console.log(`  << [${meta.state}] ${meta.name}` + (meta.name === 'disconnect' ? ' :: ' + JSON.stringify(data).slice(0, 300) : ''));
-    });
-  }
+  mc._client?.on('packet', (data, meta) => {
+    if (meta.state === 'login' && meta.name === 'success') loginSucceeded = true;
+    if (meta.state === 'configuration') reachedConfig = true;
+    if (bot.logPackets && packetCount < 40) {
+      packetCount++;
+      console.log(`  << [${meta.state}] ${meta.name}` + (meta.name === 'disconnect' ? ' :: ' + JSON.stringify(data).slice(0, 300) : ''));
+    }
+  });
   const api = new BazaarApi(cfg);
   const driver = new MineflayerDriver(mc, cfg, { log: (m) => console.log(m) });
   const sm = new StateMachine(cfg, api, driver);
@@ -113,13 +116,17 @@ function start() {
     running = false;
     const delay = Math.min(60, 15 * Math.min(attempts, 4));
     console.log(`disconnected: ${why} — reconnecting in ${delay}s`);
-    // Diagnostic: repeated socketClosed BEFORE login = Hypixel refused the
-    // handshake, not an in-game kick. Common causes, most→least likely on a VPS:
-    if (why === 'socketClosed' && attempts >= 2) {
-      console.log('  ⚠ socketClosed before login — Hypixel refused the connection. Try, in order:');
-      console.log('    1) Join Hypixel ONCE from a real Minecraft client on this account (accept the rules).');
-      console.log('    2) VPS IPs are often blocked — try from a residential IP or a proxy.');
-      console.log('    3) Set "version":"auto" (or try "1.21.8") in config.json.');
+    // Diagnose by HOW FAR we got.
+    if (why === 'socketClosed' && loginSucceeded) {
+      // Auth/version/IP are all fine — Hypixel dropped us AFTER login, in the
+      // configuration phase (before spawning). That's Hypixel's own gate.
+      console.log('  ⚠ login SUCCEEDED, then dropped during the configuration phase (before spawn).');
+      console.log(`    (reached configuration: ${reachedConfig}) — this is Hypixel's gate, NOT auth/version/IP. Try:`);
+      console.log('    1) Join Hypixel ONCE from a real Minecraft client on this account & accept the rules.');
+      console.log('    2) Try "version":"auto" or "1.21.8" — some Hypixel config-phase packets trip newer builds.');
+      console.log('    3) If your OTHER Mineflayer bots reach spawn on this account, tell Claude what version/options they use.');
+    } else if (why === 'socketClosed' && attempts >= 2) {
+      console.log('  ⚠ socketClosed before login success — refused at handshake (version/IP/anti-bot).');
     }
     if (attempts === 1) notify('⚠️ disconnected: ' + why);
     setTimeout(start, delay * 1000);

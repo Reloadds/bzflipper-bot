@@ -68,6 +68,7 @@ console.log(`bzflipper-bot — ${bot.dryRun ? 'OBSERVE (dry run — no orders)' 
 
 // ---- connect ----
 let attempts = 0;
+let everSpawned = false; // once true, disconnects are real drops worth reconnecting
 function start() {
   attempts++;
   console.log(`connecting (attempt ${attempts}) — version ${bot.version || 'auto'} …`);
@@ -166,26 +167,29 @@ function start() {
   mc.on('error', (err) => console.log('error:', err.message));
   mc.on('end', (why) => {
     running = false;
+
+    // DETERMINISTIC handshake failure: login succeeded but we never reached play
+    // (mineflayer#3775 — Hypixel parks us in Limbo, our socket dies in the
+    // configuration handoff). Retrying will NEVER succeed and just SPAM-connects
+    // Hypixel (the on/off/on/off flapping) — which flags accounts. HALT instead.
+    if (why === 'socketClosed' && loginSucceeded && !everSpawned) {
+      console.log('\n\x1b[31m⛔ HALTED — this cannot connect directly.\x1b[0m');
+      console.log('  mineflayer completes login, Hypixel puts the account in LIMBO, then mineflayer');
+      console.log('  drops the socket in the 1.21.11 configuration handoff (bug #3775). Retrying only');
+      console.log('  spam-connects Hypixel (risky). \x1b[36mYou MUST route through a proxy (ViaProxy).\x1b[0m');
+      console.log('  Set host/port in config.json to your working proxy, then restart. (README → proxy)');
+      notify('⛔ direct connect impossible (mineflayer #3775) — route through your proxy. Halted to avoid connect-spam.');
+      return; // no reconnect — the loop is what's flapping the account
+    }
+
     const delay = Math.min(60, 15 * Math.min(attempts, 4));
     console.log(`disconnected: ${why} — reconnecting in ${delay}s`);
-    // Diagnose by HOW FAR we got.
-    if (why === 'socketClosed' && loginSucceeded && !reachedConfig) {
-      // The account lingers ONLINE on Hypixel after we "disconnect" — the server
-      // accepted login and is waiting for the client's configuration handshake
-      // while OUR side dies silently (mineflayer#3775 family). Run with
-      // "logPackets": true and check the >>/== lines: whether login_acknowledged
-      // was ever sent, and who closed the socket. If direct connect won't
-      // handshake, point host/port at your working proxy — it handles this phase.
-      console.log('  ⚠ died in the login→configuration handoff (our side went silent; server was still waiting).');
-      console.log('    With logPackets:true, send Claude the >>/==/<< lines around the drop.');
-    } else if (why === 'socketClosed' && attempts >= 2) {
-      console.log('  ⚠ socketClosed before login success — refused at handshake (version/IP/anti-bot).');
-    }
     if (attempts === 1) notify('⚠️ disconnected: ' + why);
     setTimeout(start, delay * 1000);
   });
 
   mc.once('spawn', async () => {
+    everSpawned = true;         // we made it into the world — real drops now reconnect
     mc.physicsEnabled = true;   // physics stayed off through configuration (see workaround)
     if (bot.viewer) await startViewer(mc);
     console.log(`spawned. warping to SkyBlock via /${bot.warpCommand} in ${bot.startDelaySec}s…`);

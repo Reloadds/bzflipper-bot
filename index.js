@@ -30,7 +30,10 @@ const bot = {
   username: raw.username, // your Microsoft email
   auth: raw.auth ?? 'microsoft',
   // "auto" (or false) → let Mineflayer negotiate the version from the server ping.
-  version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.21.11'),
+  // DEFAULT 1.20.1: direct 1.21.x connections die in the configuration handoff
+  // (mineflayer#3775); pre-1.20.2 has no configuration phase. Hypixel accepts it
+  // via ViaVersion — server is still 1.21.11, Bazaar reads identically.
+  version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.20.1'),
   warpCommand: raw.warpCommand ?? 'skyblock',
   webhookUrl: raw.webhookUrl ?? '',
   webhookStatusMin: raw.webhookStatusMin ?? 30,
@@ -173,12 +176,12 @@ function start() {
     // configuration handoff). Retrying will NEVER succeed and just SPAM-connects
     // Hypixel (the on/off/on/off flapping) — which flags accounts. HALT instead.
     if (why === 'socketClosed' && loginSucceeded && !everSpawned) {
-      console.log('\n\x1b[31m⛔ HALTED — this cannot connect directly.\x1b[0m');
-      console.log('  mineflayer completes login, Hypixel puts the account in LIMBO, then mineflayer');
-      console.log('  drops the socket in the 1.21.11 configuration handoff (bug #3775). Retrying only');
-      console.log('  spam-connects Hypixel (risky). \x1b[36mYou MUST route through a proxy (ViaProxy).\x1b[0m');
-      console.log('  Set host/port in config.json to your working proxy, then restart. (README → proxy)');
-      notify('⛔ direct connect impossible (mineflayer #3775) — route through your proxy. Halted to avoid connect-spam.');
+      console.log('\n\x1b[31m⛔ HALTED — the 1.20.2+ configuration handoff (bug #3775) killed the socket.\x1b[0m');
+      console.log('  \x1b[36mFIX (no proxy needed): set "version" to a pre-1.20.2 protocol in config.json —\x1b[0m');
+      console.log('  \x1b[36mtry "1.20.1" (closest to 1.21.11), else "1.19.4" or "1.8.9". Hypixel accepts them\x1b[0m');
+      console.log('  \x1b[36mvia ViaVersion; the server is still 1.21.11 and the Bazaar reads identically.\x1b[0m');
+      console.log('  (Retrying the SAME version only spam-connects Hypixel, so we halt instead.)');
+      notify('⛔ 1.21.x direct fails (mineflayer #3775). Set version to 1.20.1 (or 1.8.9) — no proxy needed.');
       return; // no reconnect — the loop is what's flapping the account
     }
 

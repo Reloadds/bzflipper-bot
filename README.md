@@ -101,6 +101,35 @@ alerts — sign-in prompts, connect/disconnect, kicks, and a periodic status lin
 (purse · orders · top flip) every `webhookStatusMin` minutes. Leave it `""` to
 disable. This is the "run it 24/7 on a VPS and watch from your phone" workflow.
 
+## Connecting through a proxy (ViaProxy etc.)
+
+If you already run a proxy on the VPS that connects to Hypixel (ViaProxy is the
+usual one), **point the bot at the proxy instead of `mc.hypixel.net`** — the proxy
+handles Hypixel's login/configuration handshake (and often holds the account),
+which is why a raw direct connection gets dropped after `[login] success`.
+
+Two proxy setups:
+
+**A) Proxy holds the Microsoft account** (most common ViaProxy setup):
+```json
+"host": "127.0.0.1",
+"port": <your proxy's listen port>,
+"auth": "offline",
+"username": "bzbot"          // any nickname — the proxy does the real auth
+```
+
+**B) Proxy is passthrough only** (you auth on the bot side):
+```json
+"host": "127.0.0.1",
+"port": <your proxy's listen port>,
+"auth": "microsoft",
+"username": "your-alt@email.com"
+```
+
+Keep `"version"` matching whatever your proxy accepts on its listen side (usually
+the same client version you'd normally join with). If the proxy is on another
+machine, use its IP instead of `127.0.0.1`.
+
 ## Troubleshooting login
 
 `disconnected: socketClosed` **before** an `✅ logged in` line means Hypixel

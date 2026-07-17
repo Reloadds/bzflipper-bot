@@ -13,6 +13,7 @@ import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
 import { scoreboardLines, tablistFooter, readWindow } from './src/gui.js';
+import { startAntiAfk } from './src/antiAfk.js';
 
 // ---- config ----
 const cfgPath = process.argv[2] || './config.json';
@@ -35,6 +36,7 @@ const bot = {
   webhookUrl: raw.webhookUrl ?? '',
   webhookStatusMin: raw.webhookStatusMin ?? 30,
   logPackets: raw.logPackets === true,
+  antiAfk: raw.antiAfk !== false, // default ON — long sessions get idle-kicked otherwise
   dryRun: raw.dryRun !== false, // default TRUE (observe only)
   observeIntervalSec: raw.observeIntervalSec ?? 15,
   startDelaySec: raw.startDelaySec ?? 8,
@@ -75,6 +77,10 @@ function start() {
   try {
     mc = mineflayer.createBot({
       host: bot.host, port: bot.port, username: bot.username, auth: bot.auth, version: bot.version,
+      // WORKAROUND (mineflayer#3623/#3775): physics packets sent during the
+      // configuration phase make some servers (Hypixel) drop the connection
+      // right after [login] success. Keep physics off until spawn.
+      physicsEnabled: false,
       // Surface the Microsoft device-code sign-in clearly (first run / expired token).
       onMsaCode: (data) => {
         console.log('\n\x1b[33m🔑 SIGN IN:\x1b[0m open \x1b[36m' + (data.verification_uri || 'https://microsoft.com/link') +
@@ -88,6 +94,37 @@ function start() {
     setTimeout(start, 15_000);
     return;
   }
+
+  // WORKAROUND (mineflayer#3623): mineflayer may not send client_information
+  // ("settings") + brand during the CONFIGURATION phase; Hypixel disconnects
+  // clients that stay silent there. Send both ourselves the moment we enter
+  // the configuration state. Extra/unknown fields are tolerated per-protocol;
+  // failures are logged but non-fatal (the upstream fix supersedes this).
+  mc._client?.on('state', (newState) => {
+    if (newState !== 'configuration') return;
+    try {
+      mc._client.write('brand', { channel: 'minecraft:brand', data: Buffer.from('\x07vanilla', 'latin1') });
+    } catch { /* some protocol builds name it custom_payload */
+      try { mc._client.write('custom_payload', { channel: 'minecraft:brand', data: Buffer.from('\x07vanilla', 'latin1') }); } catch {}
+    }
+    try {
+      mc._client.write('settings', {
+        locale: 'en_US',
+        viewDistance: 8,
+        chatFlags: 0,
+        chatColors: true,
+        skinParts: 127,
+        mainHand: 1,
+        enableTextFiltering: false,
+        enableServerListing: true,
+        particleStatus: 0,
+        particles: 0,
+      });
+      console.log('  >> [configuration] settings + brand sent (hypixel workaround)');
+    } catch (e) {
+      console.log('  >> [configuration] settings write failed:', e.message);
+    }
+  });
 
   // Deep diagnostics: see exactly how far the handshake gets and the raw errors.
   let loginSucceeded = false, reachedConfig = false, packetCount = 0;
@@ -133,7 +170,12 @@ function start() {
   });
 
   mc.once('spawn', async () => {
+    mc.physicsEnabled = true;   // physics stayed off through configuration (see workaround)
     if (bot.viewer) await startViewer(mc);
+    if (bot.antiAfk) {
+      startAntiAfk(mc, { log: bot.logPackets ? console.log : () => {} });
+      console.log('anti-afk: on (gentle randomized nudges every 2–4 min)');
+    }
     console.log(`spawned. warping to SkyBlock via /${bot.warpCommand} in ${bot.startDelaySec}s…`);
     await mc.waitForTicks(bot.startDelaySec * 20);
     mc.chat('/' + bot.warpCommand);

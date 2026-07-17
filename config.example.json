@@ -1,0 +1,29 @@
+{
+  "username": "your-microsoft-email@example.com",
+  "auth": "microsoft",
+  "host": "mc.hypixel.net",
+  "port": 25565,
+  "version": "1.21",
+
+  "warpCommand": "skyblock",
+  "startDelaySec": 8,
+
+  "dryRun": true,
+  "observeIntervalSec": 15,
+
+  "strategy": {
+    "orderLimit": 14,
+    "taxFraction": 0.0125,
+    "apiMinMargin": 0.03,
+    "apiMaxMargin": 0.30,
+    "apiMinWeeklyVolume": 250000,
+    "minOrderValue": 250000,
+    "orderVolumeFraction": 0.5,
+    "maxOrderVolumeFraction": 1.0,
+    "orderBudgetFraction": 0.5,
+    "coinReserve": 0,
+    "actionDelayTicks": 3,
+    "actionJitterTicks": 2,
+    "cookieRefreshEnabled": false
+  }
+}

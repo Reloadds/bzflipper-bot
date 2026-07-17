@@ -1,0 +1,15 @@
+{
+  "name": "bzflipper-bot",
+  "version": "0.1.0",
+  "description": "Headless Hypixel SkyBlock Bazaar flipper (Mineflayer) driving the bzflipper brain.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node index.js",
+    "observe": "node index.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.20.0"
+  },
+  "license": "MIT"
+}

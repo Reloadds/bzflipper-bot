@@ -13,7 +13,6 @@ import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
 import { scoreboardLines, tablistFooter, readWindow } from './src/gui.js';
-import { startAntiAfk } from './src/antiAfk.js';
 
 // ---- config ----
 const cfgPath = process.argv[2] || './config.json';
@@ -31,14 +30,11 @@ const bot = {
   username: raw.username, // your Microsoft email
   auth: raw.auth ?? 'microsoft',
   // "auto" (or false) → let Mineflayer negotiate the version from the server ping.
-  // DEFAULT 1.20.1: mineflayer breaks in the 1.20.2+ configuration phase on
-  // Hypixel (mineflayer#3775); Hypixel accepts 1.20.1 clients via ViaVersion.
-  version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.20.1'),
+  version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.21.11'),
   warpCommand: raw.warpCommand ?? 'skyblock',
   webhookUrl: raw.webhookUrl ?? '',
   webhookStatusMin: raw.webhookStatusMin ?? 30,
   logPackets: raw.logPackets === true,
-  antiAfk: raw.antiAfk !== false, // default ON — long sessions get idle-kicked otherwise
   dryRun: raw.dryRun !== false, // default TRUE (observe only)
   observeIntervalSec: raw.observeIntervalSec ?? 15,
   startDelaySec: raw.startDelaySec ?? 8,
@@ -134,11 +130,28 @@ function start() {
   mc._client?.on('packet', (data, meta) => {
     if (meta.state === 'login' && meta.name === 'success') loginSucceeded = true;
     if (meta.state === 'configuration') reachedConfig = true;
-    if (bot.logPackets && packetCount < 40) {
+    if (bot.logPackets && packetCount < 60) {
       packetCount++;
       console.log(`  << [${meta.state}] ${meta.name}` + (meta.name === 'disconnect' ? ' :: ' + JSON.stringify(data).slice(0, 300) : ''));
     }
   });
+  if (bot.logPackets && mc._client) {
+    // OUTGOING packets + state changes + raw socket teardown — pinpoints whether
+    // our side ever sends login_acknowledged/settings and who closes the TCP socket.
+    const origWrite = mc._client.write.bind(mc._client);
+    mc._client.write = (name, params) => {
+      console.log(`  >> [${mc._client.state}] ${name}`);
+      return origWrite(name, params);
+    };
+    mc._client.on('state', (ns, os) => console.log(`  == state: ${os} → ${ns}`));
+    const hookSocket = () => {
+      const s = mc._client.socket;
+      if (!s) return setTimeout(hookSocket, 200);
+      s.on('close', (hadError) => console.log(`  == socket closed (hadError=${hadError})`));
+      s.on('error', (e) => console.log(`  == socket error: ${e.code || ''} ${e.message}`));
+    };
+    hookSocket();
+  }
   const api = new BazaarApi(cfg);
   const driver = new MineflayerDriver(mc, cfg, { log: (m) => console.log(m) });
   const sm = new StateMachine(cfg, api, driver);
@@ -157,13 +170,14 @@ function start() {
     console.log(`disconnected: ${why} — reconnecting in ${delay}s`);
     // Diagnose by HOW FAR we got.
     if (why === 'socketClosed' && loginSucceeded && !reachedConfig) {
-      // KNOWN MINEFLAYER BUG (#3775): on protocols >1.20.1 the client dies
-      // silently in the login→configuration handoff. Telltale: the account
-      // lingers ONLINE on Hypixel after we "disconnect" — the server is still
-      // waiting for our acknowledgement; nobody kicked us, our side died.
-      console.log('  ⚠ mineflayer bug #3775: versions >1.20.1 break in the configuration handoff on Hypixel.');
-      console.log('    FIX: set "version": "1.20.1" in config.json — Hypixel translates old client');
-      console.log('    versions server-side (ViaVersion); the Bazaar works identically.');
+      // The account lingers ONLINE on Hypixel after we "disconnect" — the server
+      // accepted login and is waiting for the client's configuration handshake
+      // while OUR side dies silently (mineflayer#3775 family). Run with
+      // "logPackets": true and check the >>/== lines: whether login_acknowledged
+      // was ever sent, and who closed the socket. If direct connect won't
+      // handshake, point host/port at your working proxy — it handles this phase.
+      console.log('  ⚠ died in the login→configuration handoff (our side went silent; server was still waiting).');
+      console.log('    With logPackets:true, send Claude the >>/==/<< lines around the drop.');
     } else if (why === 'socketClosed' && attempts >= 2) {
       console.log('  ⚠ socketClosed before login success — refused at handshake (version/IP/anti-bot).');
     }
@@ -174,10 +188,6 @@ function start() {
   mc.once('spawn', async () => {
     mc.physicsEnabled = true;   // physics stayed off through configuration (see workaround)
     if (bot.viewer) await startViewer(mc);
-    if (bot.antiAfk) {
-      startAntiAfk(mc, { log: bot.logPackets ? console.log : () => {} });
-      console.log('anti-afk: on (gentle randomized nudges every 2–4 min)');
-    }
     console.log(`spawned. warping to SkyBlock via /${bot.warpCommand} in ${bot.startDelaySec}s…`);
     await mc.waitForTicks(bot.startDelaySec * 20);
     mc.chat('/' + bot.warpCommand);

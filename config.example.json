@@ -11,6 +11,10 @@
   "dryRun": true,
   "observeIntervalSec": 15,
 
+  "viewer": false,
+  "viewerPort": 3007,
+  "debugDump": false,
+
   "strategy": {
     "orderLimit": 14,
     "taxFraction": 0.0125,

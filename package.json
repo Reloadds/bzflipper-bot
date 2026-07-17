@@ -9,7 +9,8 @@
     "observe": "node index.js"
   },
   "dependencies": {
-    "mineflayer": "^4.20.0"
+    "mineflayer": "^4.20.0",
+    "prismarine-viewer": "^1.28.0"
   },
   "license": "MIT"
 }

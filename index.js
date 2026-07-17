@@ -12,7 +12,7 @@ import { makeConfig } from './src/config.js';
 import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
-import { scoreboardLines } from './src/gui.js';
+import { scoreboardLines, tablistFooter, readWindow } from './src/gui.js';
 
 // ---- config ----
 const cfgPath = process.argv[2] || './config.json';
@@ -34,6 +34,9 @@ const bot = {
   dryRun: raw.dryRun !== false, // default TRUE (observe only)
   observeIntervalSec: raw.observeIntervalSec ?? 15,
   startDelaySec: raw.startDelaySec ?? 8,
+  viewer: raw.viewer === true,
+  viewerPort: raw.viewerPort ?? 3007,
+  debugDump: raw.debugDump === true,
 };
 
 const fmt = (v) => {
@@ -67,6 +70,7 @@ function start() {
   });
 
   mc.once('spawn', async () => {
+    if (bot.viewer) await startViewer(mc);
     console.log(`spawned. warping to SkyBlock via /${bot.warpCommand} in ${bot.startDelaySec}s…`);
     await mc.waitForTicks(bot.startDelaySec * 20);
     mc.chat('/' + bot.warpCommand);
@@ -98,6 +102,17 @@ async function observeLoop(mc, api, driver, cfg, alive) {
         console.log('  OPEN ORDERS:');
         grid.forEach((o) => console.log(`   ${o.side.toUpperCase().padEnd(4)} ${o.item.padEnd(24)} ${fmt(o.price)} × ${o.amount}  ${o.filledPct.toFixed(0)}%${o.claimable ? ' [claim]' : ''}`));
       }
+      // Raw GUI dump for remote debugging: paste this if a read looks wrong, so the
+      // Hypixel string anchors (the `S` table) can be corrected against reality.
+      if (bot.debugDump) {
+        console.log('  --- DEBUG: scoreboard sidebar ---');
+        scoreboardLines(mc).forEach((l) => console.log('   | ' + l));
+        console.log('  --- DEBUG: tablist footer ---');
+        console.log('   | ' + tablistFooter(mc).replace(/\n/g, '\n   | '));
+        console.log('  --- DEBUG: open window slots (name — lore[0..2]) ---');
+        readWindow(mc.currentWindow).slice(0, 30).forEach((r) =>
+          console.log(`   [${r.slot}] "${r.name}"  ::  ${r.lore.slice(0, 3).join(' | ')}`));
+      }
     } catch (e) {
       console.log('observe error:', e.message);
     }
@@ -120,6 +135,17 @@ async function liveLoop(sm, api, cfg, alive) {
       console.log('tick error:', e.message);
     }
     await sleep(((cfg.actionDelayTicks ?? 3) / 20) * 1000 + 250);
+  }
+}
+
+// ---- prismarine-viewer: watch the bot in a browser during bring-up ----
+async function startViewer(mc) {
+  try {
+    const pv = (await import('prismarine-viewer')).default;
+    pv.mineflayer(mc, { port: bot.viewerPort, firstPerson: false });
+    console.log(`\x1b[36mviewer: http://localhost:${bot.viewerPort}\x1b[0m  (remote box? tunnel: ssh -L ${bot.viewerPort}:localhost:${bot.viewerPort} user@host)`);
+  } catch (e) {
+    console.log('viewer failed to start (npm i prismarine-viewer?):', e.message);
   }
 }
 

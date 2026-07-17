@@ -55,6 +55,20 @@ Every ~15s:
 That proves the whole chain works headless: login → SkyBlock → Bazaar read →
 ranking. **This is what to verify first.**
 
+## Watching + debugging
+
+Two switches in `config.json` make bring-up and remote debugging easy:
+
+- **`"viewer": true`** — starts [prismarine-viewer](https://github.com/PrismarineJS/prismarine-viewer)
+  at `http://localhost:<viewerPort>` (default 3007) so you can *watch* the bot in a
+  browser. On a remote box, tunnel it:
+  `ssh -L 3007:localhost:3007 user@your-host` then open `http://localhost:3007`.
+- **`"debugDump": true`** — each OBSERVE cycle also prints the **raw** scoreboard,
+  tab-list footer, and open-window slots (name + lore). If a read looks wrong
+  (empty order grid, purse `—`, etc.), **paste that dump** — it's exactly what's
+  needed to correct the Hypixel string anchors (the `S` table in
+  `mineflayerDriver.js`) against your real GUIs.
+
 ## Going live (only after OBSERVE looks right)
 
 Set `"dryRun": false` in `config.json`. The state machine then trades.
@@ -94,9 +108,9 @@ manually (or `cookieRefreshEnabled: false`, the default).
 
 - [x] Brain + state machine (vendored, tested — 14/14).
 - [x] Mineflayer driver: reads (purse/cookie/orders) + OBSERVE mode.
+- [x] `prismarine-viewer` hook + raw GUI debug dump to watch/debug bring-up.
 - [ ] Tune the write sequences (sign input, confirm slots) against live GUIs.
 - [ ] Port the hardened cookie-consume flow to headless.
-- [ ] `prismarine-viewer` hook to watch bring-up.
 
 ## License
 

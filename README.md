@@ -94,6 +94,30 @@ manually (or `cookieRefreshEnabled: false`, the default).
 - `strategy` — the brain knobs (order slots, margins, sizing, volume floors …),
   same meaning as the mod's config.
 
+## Discord / webhook alerts
+
+Set `"webhookUrl"` to a Discord (or any compatible) webhook URL to get pushed
+alerts — sign-in prompts, connect/disconnect, kicks, and a periodic status line
+(purse · orders · top flip) every `webhookStatusMin` minutes. Leave it `""` to
+disable. This is the "run it 24/7 on a VPS and watch from your phone" workflow.
+
+## Troubleshooting login
+
+`disconnected: socketClosed` **before** an `✅ logged in` line means Hypixel
+refused the connection during handshake (not an in-game kick). In order:
+
+1. **Join Hypixel once from a real Minecraft client** on this account and accept
+   the network rules — a brand-new account that has never joined gets closed.
+2. **VPS IPs are frequently blocked/greylisted** by Hypixel's anti-bot. A
+   datacenter IP (Vultr, etc.) is a common cause of instant `socketClosed`; try a
+   residential IP or a proxy.
+3. Try `"version": "auto"` (negotiate from the server) or a nearby release like
+   `"1.21.8"`.
+
+The console now prints these hints after repeated failures, and the Microsoft
+**sign-in code is shown clearly** (`🔑 SIGN IN: …`) — if you never see that code,
+the failure is at Hypixel's gate, not auth.
+
 ## Known caveats (be realistic)
 
 - **Version support.** Mineflayer needs `minecraft-data` to support the protocol

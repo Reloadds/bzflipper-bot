@@ -15,6 +15,9 @@
   "viewerPort": 3007,
   "debugDump": false,
 
+  "webhookUrl": "",
+  "webhookStatusMin": 30,
+
   "strategy": {
     "orderLimit": 14,
     "taxFraction": 0.0125,

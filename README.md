@@ -105,6 +105,40 @@ alerts — sign-in prompts, connect/disconnect, kicks, and a periodic status lin
 (purse · orders · top flip) every `webhookStatusMin` minutes. Leave it `""` to
 disable. This is the "run it 24/7 on a VPS and watch from your phone" workflow.
 
+## ⚠️ Direct connection to Hypixel does NOT work — use a proxy
+
+Mineflayer cannot complete Hypixel's login→configuration handshake on 1.20.2+
+(confirmed: login succeeds, we send `login_acknowledged` + brand + settings, then
+Hypixel closes the socket itself before sending any configuration data). This is
+[mineflayer#3775](https://github.com/PrismarineJS/mineflayer/issues/3775), closed
+upstream as *not planned*. **You must route through a proxy** (ViaProxy) that
+handles Hypixel's handshake and hands a clean stream to the bot.
+
+### ViaProxy setup (the working path)
+
+1. Download **ViaProxy** (jar) from
+   <https://github.com/ViaVersion/ViaProxy/releases> onto the same machine as the
+   bot. Needs Java 17+.
+2. Run it and configure:
+   - **Target**: `mc.hypixel.net`  ·  **Target version**: `1.21.11` (or "Auto")
+   - **Bind / local port**: e.g. `127.0.0.1:25568`
+   - **Account**: add your alt's Microsoft account in ViaProxy (it does the real
+     auth to Hypixel), OR use passthrough and auth on the bot side.
+   - ViaProxy has a GUI; for a headless VPS use its `viaproxy.yml` and run
+     `java -jar ViaProxy-*.jar` (see its wiki for headless/CLI mode).
+3. Point the bot at ViaProxy in `config.json`:
+   ```json
+   "host": "127.0.0.1",
+   "port": 25568,
+   "auth": "offline",
+   "username": "bzbot"
+   ```
+   (offline because ViaProxy holds the account; keep `"version"` matching what
+   ViaProxy accepts on its listen side.)
+
+If you ALREADY run a working proxy (you said you do), just set `host`/`port` to it
+and `auth` per the two modes below — no new setup needed.
+
 ## Connecting through a proxy (ViaProxy etc.)
 
 If you already run a proxy on the VPS that connects to Hypixel (ViaProxy is the

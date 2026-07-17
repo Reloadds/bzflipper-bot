@@ -34,6 +34,7 @@ const bot = {
   warpCommand: raw.warpCommand ?? 'skyblock',
   webhookUrl: raw.webhookUrl ?? '',
   webhookStatusMin: raw.webhookStatusMin ?? 30,
+  logPackets: raw.logPackets === true,
   dryRun: raw.dryRun !== false, // default TRUE (observe only)
   observeIntervalSec: raw.observeIntervalSec ?? 15,
   startDelaySec: raw.startDelaySec ?? 8,
@@ -70,15 +71,32 @@ let attempts = 0;
 function start() {
   attempts++;
   console.log(`connecting (attempt ${attempts}) — version ${bot.version || 'auto'} …`);
-  const mc = mineflayer.createBot({
-    host: bot.host, port: bot.port, username: bot.username, auth: bot.auth, version: bot.version,
-    // Surface the Microsoft device-code sign-in clearly (first run / expired token).
-    onMsaCode: (data) => {
-      console.log('\n\x1b[33m🔑 SIGN IN:\x1b[0m open \x1b[36m' + (data.verification_uri || 'https://microsoft.com/link') +
-        '\x1b[0m and enter code \x1b[36m' + data.user_code + '\x1b[0m  (as ' + bot.username + ')\n');
-      notify(`🔑 Sign-in needed: open ${data.verification_uri} code \`${data.user_code}\``);
-    },
-  });
+  let mc;
+  try {
+    mc = mineflayer.createBot({
+      host: bot.host, port: bot.port, username: bot.username, auth: bot.auth, version: bot.version,
+      // Surface the Microsoft device-code sign-in clearly (first run / expired token).
+      onMsaCode: (data) => {
+        console.log('\n\x1b[33m🔑 SIGN IN:\x1b[0m open \x1b[36m' + (data.verification_uri || 'https://microsoft.com/link') +
+          '\x1b[0m and enter code \x1b[36m' + data.user_code + '\x1b[0m  (as ' + bot.username + ')\n');
+        notify(`🔑 Sign-in needed: open ${data.verification_uri} code \`${data.user_code}\``);
+      },
+    });
+  } catch (e) {
+    console.log('\x1b[31mcreateBot failed:\x1b[0m', e.message);
+    console.log('  → your installed mineflayer may not know this version. Try: npm i mineflayer@latest minecraft-data@latest');
+    setTimeout(start, 15_000);
+    return;
+  }
+
+  // Deep diagnostics: see exactly how far the handshake gets and the raw errors.
+  mc._client?.on('error', (e) => console.log('  client error:', e.code || '', e.message));
+  if (bot.logPackets) {
+    let n = 0;
+    mc._client?.on('packet', (data, meta) => {
+      if (n++ < 40) console.log(`  << [${meta.state}] ${meta.name}` + (meta.name === 'disconnect' ? ' :: ' + JSON.stringify(data).slice(0, 300) : ''));
+    });
+  }
   const api = new BazaarApi(cfg);
   const driver = new MineflayerDriver(mc, cfg, { log: (m) => console.log(m) });
   const sm = new StateMachine(cfg, api, driver);

@@ -17,6 +17,7 @@
 
   "webhookUrl": "",
   "webhookStatusMin": 30,
+  "logPackets": false,
 
   "strategy": {
     "orderLimit": 14,

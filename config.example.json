@@ -3,7 +3,7 @@
   "auth": "microsoft",
   "host": "mc.hypixel.net",
   "port": 25565,
-  "version": "1.21",
+  "version": "1.21.11",
 
   "warpCommand": "skyblock",
   "startDelaySec": 8,

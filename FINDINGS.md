@@ -28,5 +28,22 @@
 | 4 | Anti-bot / Limbo | Reaches Limbo; account joined normally? (assume yes — it's the user's alt). |
 | 5 | Secure chat / session | Not observed. |
 
+## GROUND TRUTH (diag.js proxy 1.20.1) — 2026-07-18
+```
+>> handshaking/set_protocol → STATE login → >> login_start
+<< login/compress, << login/success → STATE login→play
+[then 15s of SILENCE — packets=2, keepAlives=0, lastPkt stays login/success]
+END: socketClosed (15.0s after last packet). No error, no uncaught, read loop NOT stalled.
+```
+**Conclusion:** ViaProxy sends the bot NOTHING after `login/success`. Not a deserialize
+error (H2 ✗), not KeepAlive (none arrive), not my bot code. **ViaProxy stalls the relay
+bridging Hypixel's 1.21.11 CONFIGURATION phase → a pre-1.20.2 client (no config phase).**
+ViaProxy↔Hypixel reaches PLAY (earlier logs) but never forwards play packets to the bot.
+
+Updated hypotheses:
+- H2 deserialize → **RULED OUT** (0 packets to parse, no error).
+- **H-new: ViaProxy config-state bridge stall for pre-1.20.2 clients.** ViaProxy setting
+  `skip-config-state-packet-queue` targets exactly this. → TESTING.
+
 ## Next test
 Instrumented `diag.js` on the PROXY path: full packet trace + keep_alive arrival/echo + thrown-error capture + heartbeat. Determine the LAST packet before the read loop stalls and whether an error is thrown. (User runs; I read the diag-*.log.)

@@ -12,7 +12,7 @@ import { makeConfig } from './src/config.js';
 import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
-import { scoreboardLines, tablistFooter, readWindow } from './src/gui.js';
+import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland } from './src/gui.js';
 
 // ---- config ----
 const cfgPath = process.argv[2] || './config.json';
@@ -35,6 +35,7 @@ const bot = {
   // via ViaVersion — server is still 1.21.11, Bazaar reads identically.
   version: (raw.version === 'auto' || raw.version === false) ? false : (raw.version ?? '1.20.1'),
   warpCommand: raw.warpCommand ?? 'skyblock',
+  islandCommand: raw.islandCommand ?? 'is',
   webhookUrl: raw.webhookUrl ?? '',
   webhookStatusMin: raw.webhookStatusMin ?? 30,
   logPackets: raw.logPackets === true,
@@ -188,19 +189,42 @@ function start() {
 
   mc.once('spawn', async () => {
     everSpawned = true;         // we made it into the world — real drops now reconnect
-    console.log('✅ spawned in-world.');
+    console.log('✅ spawned in-world (likely Limbo). Heading to SkyBlock…');
     if (bot.viewer) await startViewer(mc);
-    console.log(`spawned. warping to SkyBlock via /${bot.warpCommand} in ${bot.startDelaySec}s…`);
-    await mc.waitForTicks(bot.startDelaySec * 20);
-    mc.chat('/' + bot.warpCommand);
-    await mc.waitForTicks(bot.startDelaySec * 20);
-    if (!scoreboardLines(mc).join(' ').includes('skyblock')) {
-      console.log('⚠ SkyBlock sidebar not detected yet — continuing anyway (check /warp).');
-    }
+
+    await joinSkyblockIsland(mc);
+
     running = true;
-    notify(`✅ ${bot.username} on SkyBlock — ${bot.dryRun ? 'OBSERVE' : 'LIVE'} mode`);
+    notify(`✅ ${bot.username} on SkyBlock island — ${bot.dryRun ? 'OBSERVE' : 'LIVE'} mode`);
     bot.dryRun ? observeLoop(mc, api, driver, cfg, () => running) : liveLoop(sm, api, cfg, () => running);
   });
+}
+
+// ---- Limbo → SkyBlock hub → private island ----
+// Sends the warp, watches the scoreboard for confirmation, retries a few times.
+// Leaving Limbo promptly also helps: an idle Limbo session is what Hypixel drops.
+async function joinSkyblockIsland(mc) {
+  const say = (c) => { console.log(`  → /${c}`); mc.chat('/' + c); };
+
+  // 1) Reach SkyBlock. From Limbo, /lobby first often helps, then the warp.
+  for (let i = 0; i < 12 && !onSkyblock(mc); i++) {
+    if (i === 2) say('lobby');            // nudge out of Limbo if the warp didn't take
+    else say(bot.warpCommand);            // default: skyblock  (→ /skyblock)
+    await sleep(4000);
+  }
+  if (!onSkyblock(mc)) {
+    console.log('⚠ SkyBlock not confirmed on the scoreboard — continuing anyway.');
+    return;
+  }
+  console.log('🌐 on SkyBlock. Warping to island…');
+  await sleep(3000);
+
+  // 2) Reach the private island.
+  for (let i = 0; i < 10 && !onIsland(mc); i++) {
+    say(bot.islandCommand);               // default: is  (→ /is)
+    await sleep(4000);
+  }
+  console.log(onIsland(mc) ? '🏝️  on your island.' : '⚠ island not confirmed — continuing anyway.');
 }
 
 // ---- OBSERVE: read + rank + print, place nothing ----

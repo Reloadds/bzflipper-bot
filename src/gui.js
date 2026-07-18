@@ -86,6 +86,23 @@ export function scoreboardLines(bot) {
     .map((it) => strip(componentText(it.displayName) || it.name || ''));
 }
 
+/** SkyBlock sidebar TITLE (e.g. "SKYBLOCK"), plain lowercased. */
+export function scoreboardTitle(bot) {
+  const sb = bot.scoreboard?.sidebar;
+  return componentText(sb?.title ?? sb?.displayName ?? sb?.name ?? '');
+}
+
+/** True if the SkyBlock scoreboard is up (title or any line mentions skyblock). */
+export function onSkyblock(bot) {
+  const all = (scoreboardTitle(bot) + ' ' + scoreboardLines(bot).join(' '));
+  return all.includes('skyblock');
+}
+
+/** True if the sidebar shows we're on the private island ("⏣ Your Island"). */
+export function onIsland(bot) {
+  return scoreboardLines(bot).some((l) => l.includes('your island') || l.includes('island'));
+}
+
 /** Tab-list footer as plain lowercased text (holds "Cookie Buff: 1d 3h"). */
 export function tablistFooter(bot) {
   return componentText(bot.tablist?.footer ?? '');

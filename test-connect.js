@@ -7,12 +7,16 @@
 
 import mineflayer from 'mineflayer';
 
+// Version from the command line, e.g.  node test-connect.js 1.21.11
+const version = process.argv[2] || '1.20.1';
+console.log(`Testing bare connection through ViaProxy as version ${version} …`);
+
 const bot = mineflayer.createBot({
   host: '127.0.0.1',
   port: 25568,
   username: 'bzbot',
   auth: 'offline',
-  version: '1.20.1',
+  version,
 });
 
 const t0 = Date.now();

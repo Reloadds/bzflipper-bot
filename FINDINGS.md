@@ -45,5 +45,10 @@ Updated hypotheses:
 - **H-new: ViaProxy config-state bridge stall for pre-1.20.2 clients.** ViaProxy setting
   `skip-config-state-packet-queue` targets exactly this. → TESTING.
 
-## Next test
-Instrumented `diag.js` on the PROXY path: full packet trace + keep_alive arrival/echo + thrown-error capture + heartbeat. Determine the LAST packet before the read loop stalls and whether an error is thrown. (User runs; I read the diag-*.log.)
+## Test results log
+- `skip-config-state-packet-queue: true` (ViaProxy restart) → NO CHANGE. Still 2 packets, dead 15s. Reverted assumption.
+- **New hypothesis (H-bridge):** bot is pre-1.20.2 (no config phase); ViaProxy must bridge
+  Hypixel's 1.21.11 config phase → a config-less client, and that bridge deadlocks (0 packets
+  forwarded). FIX: use a bot version that HAS the config phase (1.20.2+) so ViaProxy relays it
+  transparently AND the config phase is handled by ViaProxy (normal server), not Hypixel (whose
+  config phase tripped mineflayer directly). → TESTING `diag.js proxy 1.20.2` (and 1.21.1).

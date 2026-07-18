@@ -45,6 +45,23 @@ Updated hypotheses:
 - **H-new: ViaProxy config-state bridge stall for pre-1.20.2 clients.** ViaProxy setting
   `skip-config-state-packet-queue` targets exactly this. → TESTING.
 
+## ★ ROOT CAUSE FOUND (2026-07-18) — ViaProxy Yggdrasil key-fetch timeout
+`diag.js proxy 1.20.2` + the ViaProxy console revealed it:
+```
+[SESSION] Switching to CONFIGURATION state
+[Yggdrasil Key Fetcher/ERROR] Failed to request yggdrasil public key
+  Failed to read from https://api.minecraftservices.com/publickeys due to Read timed out
+[DISCONNECT] Connection closed   (~15s after session)
+```
+The 15.x-second death across EVERY attempt = ViaProxy hanging on the chat-signing public-key
+fetch (api.minecraftservices.com/publickeys) and timing out. NOT the protocol, bot version,
+config bridge, or mineflayer. This is Hypothesis 5 (secure chat/session), network-side.
+- Note: bot-as-1.20.2 correctly did `login_acknowledged` → `STATE login→configuration` (config
+  phase handling through ViaProxy is FINE) — it only died on the key timeout.
+**FIX:** ViaProxy `chat-signing: false` → skips the public-key fetch entirely. (Observe mode
+sends no chat, so signing is unneeded.) If the endpoint is just slow/blocked on this network,
+this bypasses it. → TESTING.
+
 ## Test results log
 - `skip-config-state-packet-queue: true` (ViaProxy restart) → NO CHANGE. Still 2 packets, dead 15s. Reverted assumption.
 - **New hypothesis (H-bridge):** bot is pre-1.20.2 (no config phase); ViaProxy must bridge

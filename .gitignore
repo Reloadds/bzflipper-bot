@@ -6,3 +6,6 @@ nmp-cache/
 # Microsoft auth token cache (mineflayer writes these to your home dir by default,
 # but never commit any that land here):
 *_cache.json
+
+# local diagnostic output
+test*.txt

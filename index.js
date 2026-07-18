@@ -79,10 +79,6 @@ function start() {
   try {
     mc = mineflayer.createBot({
       host: bot.host, port: bot.port, username: bot.username, auth: bot.auth, version: bot.version,
-      // WORKAROUND (mineflayer#3623/#3775): physics packets sent during the
-      // configuration phase make some servers (Hypixel) drop the connection
-      // right after [login] success. Keep physics off until spawn.
-      physicsEnabled: false,
       // Surface the Microsoft device-code sign-in clearly (first run / expired token).
       onMsaCode: (data) => {
         console.log('\n\x1b[33m🔑 SIGN IN:\x1b[0m open \x1b[36m' + (data.verification_uri || 'https://microsoft.com/link') +
@@ -129,11 +125,12 @@ function start() {
   });
 
   // Deep diagnostics: see exactly how far the handshake gets and the raw errors.
-  let loginSucceeded = false, reachedConfig = false, packetCount = 0;
+  let loginSucceeded = false, reachedConfig = false, reachedPlay = false, packetCount = 0;
   mc._client?.on('error', (e) => console.log('  client error:', e.code || '', e.message));
   mc._client?.on('packet', (data, meta) => {
     if (meta.state === 'login' && meta.name === 'success') loginSucceeded = true;
     if (meta.state === 'configuration') reachedConfig = true;
+    if (meta.state === 'play') reachedPlay = true;
     if (bot.logPackets && packetCount < 60) {
       packetCount++;
       console.log(`  << [${meta.state}] ${meta.name}` + (meta.name === 'disconnect' ? ' :: ' + JSON.stringify(data).slice(0, 300) : ''));
@@ -171,18 +168,16 @@ function start() {
   mc.on('end', (why) => {
     running = false;
 
-    // DETERMINISTIC handshake failure: login succeeded but we never reached play
-    // (mineflayer#3775 — Hypixel parks us in Limbo, our socket dies in the
-    // configuration handoff). Retrying will NEVER succeed and just SPAM-connects
-    // Hypixel (the on/off/on/off flapping) — which flags accounts. HALT instead.
-    if (why === 'socketClosed' && loginSucceeded && !everSpawned) {
-      console.log('\n\x1b[31m⛔ HALTED — the 1.20.2+ configuration handoff (bug #3775) killed the socket.\x1b[0m');
-      console.log('  \x1b[36mFIX (no proxy needed): set "version" to a pre-1.20.2 protocol in config.json —\x1b[0m');
-      console.log('  \x1b[36mtry "1.20.1" (closest to 1.21.11), else "1.19.4" or "1.8.9". Hypixel accepts them\x1b[0m');
-      console.log('  \x1b[36mvia ViaVersion; the server is still 1.21.11 and the Bazaar reads identically.\x1b[0m');
-      console.log('  (Retrying the SAME version only spam-connects Hypixel, so we halt instead.)');
-      notify('⛔ 1.21.x direct fails (mineflayer #3775). Set version to 1.20.1 (or 1.8.9) — no proxy needed.');
-      return; // no reconnect — the loop is what's flapping the account
+    // DETERMINISTIC handshake failure: login succeeded but we died in the
+    // CONFIGURATION handoff and never reached PLAY (mineflayer#3775, direct 1.20.2+).
+    // Retrying can't help and only spam-connects Hypixel, so HALT. If we DID reach
+    // play (e.g. via ViaProxy on 1.8.9), a drop is a normal in-game disconnect —
+    // reconnect below.
+    if (why === 'socketClosed' && loginSucceeded && !reachedPlay && !everSpawned) {
+      console.log('\n\x1b[31m⛔ HALTED — died in the 1.20.2+ configuration handoff (bug #3775); never reached play.\x1b[0m');
+      console.log('  \x1b[36mUse a pre-1.20.2 protocol ("1.8.9") — via ViaProxy if SkyBlock requires 1.21.11.\x1b[0m');
+      notify('⛔ config-handoff failure (mineflayer #3775) — use 1.8.9 / ViaProxy.');
+      return;
     }
 
     const delay = Math.min(60, 15 * Math.min(attempts, 4));
@@ -193,7 +188,7 @@ function start() {
 
   mc.once('spawn', async () => {
     everSpawned = true;         // we made it into the world — real drops now reconnect
-    mc.physicsEnabled = true;   // physics stayed off through configuration (see workaround)
+    console.log('✅ spawned in-world.');
     if (bot.viewer) await startViewer(mc);
     console.log(`spawned. warping to SkyBlock via /${bot.warpCommand} in ${bot.startDelaySec}s…`);
     await mc.waitForTicks(bot.startDelaySec * 20);

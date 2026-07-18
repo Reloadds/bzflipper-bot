@@ -146,6 +146,11 @@ function start() {
       return origWrite(name, params);
     };
     mc._client.on('state', (ns, os) => console.log(`  == state: ${os} → ${ns}`));
+  }
+  // reachedPlay off the STATE transition (not just an incoming packet), so the
+  // halt message is accurate when we enter play then get dropped.
+  if (mc._client) {
+    mc._client.on('state', (ns) => { if (ns === 'play') reachedPlay = true; });
     const hookSocket = () => {
       const s = mc._client.socket;
       if (!s) return setTimeout(hookSocket, 200);

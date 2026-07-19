@@ -12,7 +12,7 @@ import { makeConfig } from './src/config.js';
 import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
-import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland } from './src/gui.js';
+import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, scoreboardTitle } from './src/gui.js';
 
 // ---- config ----
 const cfgPath = process.argv[2] || './config.json';
@@ -175,21 +175,11 @@ function start() {
   mc.on('end', (why) => {
     running = false;
 
-    // DETERMINISTIC handshake failure: login succeeded but we died in the
-    // CONFIGURATION handoff and never reached PLAY (mineflayer#3775, direct 1.20.2+).
-    // Retrying can't help and only spam-connects Hypixel, so HALT. If we DID reach
-    // play (e.g. via ViaProxy on 1.8.9), a drop is a normal in-game disconnect —
-    // reconnect below.
-    if (why === 'socketClosed' && loginSucceeded && !reachedPlay && !everSpawned) {
-      console.log('\n\x1b[31m⛔ HALTED — died in the 1.20.2+ configuration handoff (bug #3775); never reached play.\x1b[0m');
-      console.log('  \x1b[36mUse a pre-1.20.2 protocol ("1.8.9") — via ViaProxy if SkyBlock requires 1.21.11.\x1b[0m');
-      notify('⛔ config-handoff failure (mineflayer #3775) — use 1.8.9 / ViaProxy.');
-      return;
-    }
-
-    const delay = Math.min(60, 15 * Math.min(attempts, 4));
+    // Reconnect with a sane floor (attempts resets to 0 on login, so don't let
+    // the backoff collapse to 0s and hammer Hypixel).
+    const delay = Math.max(8, Math.min(60, 15 * Math.min(attempts, 4)));
     console.log(`disconnected: ${why} — reconnecting in ${delay}s`);
-    if (attempts === 1) notify('⚠️ disconnected: ' + why);
+    if (attempts <= 1) notify('⚠️ disconnected: ' + why);
     setTimeout(start, delay * 1000);
   });
 
@@ -206,31 +196,41 @@ function start() {
   });
 }
 
-// ---- Limbo → SkyBlock hub → private island ----
-// Sends the warp, watches the scoreboard for confirmation, retries a few times.
-// Leaving Limbo promptly also helps: an idle Limbo session is what Hypixel drops.
+// ---- Limbo → SkyBlock → private island ----
+// Instrumented: logs the scoreboard state at each step so we can SEE where the
+// bot is (Limbo / Main Lobby / SkyBlock) and why a warp didn't land. Hypixel
+// routes sub-servers internally (fires fresh login/spawn), so we read the LIVE
+// scoreboard each pass and adapt instead of blindly spamming.
 async function joinSkyblockIsland(mc) {
-  const say = (c) => { console.log(`  → /${c}`); mc.chat('/' + c); };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const state = () => {
+    const t = scoreboardTitle(mc);
+    const lines = scoreboardLines(mc);
+    const joined = (t + ' ' + lines.join(' '));
+    let where = 'unknown';
+    if (onIsland(mc)) where = 'ISLAND';
+    else if (onSkyblock(mc)) where = 'SKYBLOCK(hub)';
+    else if (joined.includes('limbo')) where = 'LIMBO';
+    else if (joined.includes('lobby') || t.includes('hypixel')) where = 'LOBBY';
+    return { where, t, lines };
+  };
+  const dump = (tag) => {
+    const s = state();
+    console.log(`  [nav ${tag}] where=${s.where} title="${s.t}" lines=[${s.lines.slice(0, 5).join(' | ')}]`);
+    return s.where;
+  };
 
-  // 1) Reach SkyBlock. From Limbo, /lobby first often helps, then the warp.
-  for (let i = 0; i < 12 && !onSkyblock(mc); i++) {
-    if (i === 2) say('lobby');            // nudge out of Limbo if the warp didn't take
-    else say(bot.warpCommand);            // default: skyblock  (→ /skyblock)
-    await sleep(4000);
+  for (let i = 0; i < 10; i++) {
+    const where = dump(`step${i}`);
+    if (where === 'ISLAND') { console.log('🏝️  on your island.'); return; }
+    if (where === 'SKYBLOCK(hub)') { console.log('  → /is'); mc.chat('/is'); await wait(6000); continue; }
+    // Not on SkyBlock yet. From Limbo we must reach a real server first; /play
+    // skyblock is the canonical warp and works from Limbo and lobbies.
+    console.log('  → /play skyblock');
+    mc.chat('/play skyblock');
+    await wait(6000);
   }
-  if (!onSkyblock(mc)) {
-    console.log('⚠ SkyBlock not confirmed on the scoreboard — continuing anyway.');
-    return;
-  }
-  console.log('🌐 on SkyBlock. Warping to island…');
-  await sleep(3000);
-
-  // 2) Reach the private island.
-  for (let i = 0; i < 10 && !onIsland(mc); i++) {
-    say(bot.islandCommand);               // default: is  (→ /is)
-    await sleep(4000);
-  }
-  console.log(onIsland(mc) ? '🏝️  on your island.' : '⚠ island not confirmed — continuing anyway.');
+  console.log('⚠ could not reach the island — the [nav] lines above show where it got stuck.');
 }
 
 // ---- OBSERVE: read + rank + print, place nothing ----

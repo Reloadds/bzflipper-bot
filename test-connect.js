@@ -5,18 +5,33 @@
 //
 // Run:  node test-connect.js       (ViaProxy must be running)
 
+import { readFileSync } from 'node:fs';
 import mineflayer from 'mineflayer';
 
-// Version from the command line, e.g.  node test-connect.js 1.21.11
-const version = process.argv[2] || '1.20.1';
-console.log(`Testing bare connection through ViaProxy as version ${version} …`);
+// Direct connection test using config.json (host/auth/username/version).
+//   node test-connect.js            uses config.json
+//   node test-connect.js 1.21.11    overrides the version
+const cfg = JSON.parse(readFileSync('./config.json', 'utf8'));
+const version = process.argv[2] || cfg.version || '1.21.11';
+console.log(`Testing connection to ${cfg.host}:${cfg.port} as version ${version} (auth ${cfg.auth}) …`);
 
 const bot = mineflayer.createBot({
-  host: '127.0.0.1',
-  port: 25568,
-  username: 'bzbot',
-  auth: 'offline',
-  version,
+  host: cfg.host, port: cfg.port, username: cfg.username, auth: cfg.auth, version,
+  hideErrors: true, // Hypixel particle packets mis-parse harmlessly (length-framed)
+  onMsaCode: (d) => console.log(`\n🔑 SIGN IN: open ${d.verification_uri} code ${d.user_code}\n`),
+});
+
+// mineflayer#3623 workaround — send client settings during the configuration
+// phase or Hypixel silently socketClosed us. Verified against 1.21.11 schema.
+bot._client.on('state', (s) => {
+  if (s === 'configuration') {
+    bot._client.write('settings', {
+      locale: 'en_US', viewDistance: 8, chatFlags: 0, chatColors: true,
+      skinParts: 0x7f, mainHand: 1, enableTextFiltering: false,
+      enableServerListing: true, particleStatus: 'all',
+    });
+    console.log('>> [configuration] settings sent');
+  }
 });
 
 const t0 = Date.now();

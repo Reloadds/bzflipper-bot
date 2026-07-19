@@ -45,7 +45,25 @@ Updated hypotheses:
 - **H-new: ViaProxy config-state bridge stall for pre-1.20.2 clients.** ViaProxy setting
   `skip-config-state-packet-queue` targets exactly this. → TESTING.
 
-## ★ ROOT CAUSE FOUND (2026-07-18) — ViaProxy Yggdrasil key-fetch timeout
+## ★★ VERIFIED FIX (2026-07-18) — configuration-phase `settings` packet
+Root cause (confirmed in a separate minimal repro): since MC 1.20.2 the join has a
+CONFIGURATION phase; a vanilla client sends its Client Information (`settings`, 0x00
+serverbound configuration) there. node-minecraft-protocol only sends it in PLAY
+(upstream PR #1499, unreleased). **Hypixel silently `socketClosed`s any client that
+doesn't send `settings` during configuration.** (This supersedes the ViaProxy
+theories below — the fix is a DIRECT 1.21.11 connection, no proxy.)
+
+FIX applied in index.js + test-connect.js, right after createBot:
+- `bot._client.on('state', s => { if (s==='configuration') bot._client.write('settings', {...}) })`
+- Fields match minecraft-data 1.21.11 `packet_common_settings` EXACTLY (9 fields incl.
+  `particleStatus:'all'`); verified serializes offline → 15 bytes.
+- `hideErrors: true` in createBot (Hypixel particle packets mis-parse harmlessly; each
+  packet is length-framed so only that packet drops). Ref mineflayer#3623.
+config.json → DIRECT: mc.hypixel.net:25565, auth microsoft, version 1.21.11.
+
+---
+## (superseded) ViaProxy investigation — ROOT CAUSE was the settings packet, not these
+### ViaProxy Yggdrasil key-fetch timeout
 `diag.js proxy 1.20.2` + the ViaProxy console revealed it:
 ```
 [SESSION] Switching to CONFIGURATION state

@@ -80,6 +80,12 @@ function start() {
   try {
     mc = mineflayer.createBot({
       host: bot.host, port: bot.port, username: bot.username, auth: bot.auth, version: bot.version,
+      // Hypixel sends particle packets that don't match the vanilla schema; each
+      // MC packet is length-framed, so a failed parse drops only that packet and
+      // the connection is fine. hideErrors silences the flood (maps to
+      // node-minecraft-protocol's deserializer noErrorLogging). Our error/kicked/
+      // end handlers still fire — those are the meaningful signals.
+      hideErrors: true,
       // Surface the Microsoft device-code sign-in clearly (first run / expired token).
       onMsaCode: (data) => {
         console.log('\n\x1b[33m🔑 SIGN IN:\x1b[0m open \x1b[36m' + (data.verification_uri || 'https://microsoft.com/link') +
@@ -94,34 +100,29 @@ function start() {
     return;
   }
 
-  // WORKAROUND (mineflayer#3623): mineflayer may not send client_information
-  // ("settings") + brand during the CONFIGURATION phase; Hypixel disconnects
-  // clients that stay silent there. Send both ourselves the moment we enter
-  // the configuration state. Extra/unknown fields are tolerated per-protocol;
-  // failures are logged but non-fatal (the upstream fix supersedes this).
-  mc._client?.on('state', (newState) => {
-    if (newState !== 'configuration') return;
-    try {
-      mc._client.write('brand', { channel: 'minecraft:brand', data: Buffer.from('\x07vanilla', 'latin1') });
-    } catch { /* some protocol builds name it custom_payload */
-      try { mc._client.write('custom_payload', { channel: 'minecraft:brand', data: Buffer.from('\x07vanilla', 'latin1') }); } catch {}
-    }
-    try {
+  // Workaround for https://github.com/PrismarineJS/mineflayer/issues/3623:
+  // Hypixel silently drops ("socketClosed") clients that never send the
+  // client-information packet during the 1.20.2+ configuration phase.
+  // Vanilla sends it there; node-minecraft-protocol only sends it in the
+  // play phase (upstream fix: PrismarineJS/node-minecraft-protocol#1499,
+  // not yet released). Remove this once that PR ships and deps are updated.
+  // Fields match minecraft-data's packet_common_settings for 1.21.11 and
+  // serialize cleanly (verified offline). 'state' not 'once': the server may
+  // re-enter configuration on a lobby/world transfer, and the packet is idempotent.
+  mc._client.on('state', (newState) => {
+    if (newState === 'configuration') {
       mc._client.write('settings', {
         locale: 'en_US',
         viewDistance: 8,
         chatFlags: 0,
         chatColors: true,
-        skinParts: 127,
+        skinParts: 0x7f,
         mainHand: 1,
         enableTextFiltering: false,
         enableServerListing: true,
-        particleStatus: 0,
-        particles: 0,
+        particleStatus: 'all',
       });
-      console.log('  >> [configuration] settings + brand sent (hypixel workaround)');
-    } catch (e) {
-      console.log('  >> [configuration] settings write failed:', e.message);
+      console.log('  >> [configuration] client settings sent (mineflayer#3623 workaround)');
     }
   });
 

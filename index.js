@@ -836,12 +836,21 @@ async function liveLoop(sm, api, cfg, alive) {
 
 // ---- prismarine-viewer: watch the bot in a browser during bring-up ----
 async function startViewer(mc) {
+  // Surface async failures too — prismarine-viewer starts an express server and
+  // often throws AFTER the call (unsupported MC version, missing block data), which
+  // a plain try/catch around the call misses.
+  const onErr = (e) => console.log('\x1b[33m[viewer] error:\x1b[0m', e?.message || e);
+  process.once('uncaughtException', onErr);
   try {
     const pv = (await import('prismarine-viewer')).default;
     pv.mineflayer(mc, { port: bot.viewerPort, firstPerson: false });
     console.log(`\x1b[36mviewer: http://localhost:${bot.viewerPort}\x1b[0m  (remote box? tunnel: ssh -L ${bot.viewerPort}:localhost:${bot.viewerPort} user@host)`);
+    console.log('\x1b[33m[viewer] note:\x1b[0m mineflayer doesn\'t load Hypixel\'s 1.21.11 chunks (loadedColumns=0), so the 3D world will be EMPTY (bot + nearby entities only). The dashboard is the useful view.');
   } catch (e) {
-    console.log('viewer failed to start (npm i prismarine-viewer?):', e.message);
+    console.log('\x1b[33m[viewer] failed to start:\x1b[0m', e.message);
+    console.log('  prismarine-viewer likely doesn\'t support 1.21.11 yet. It also can\'t show the island (no chunks) — use the dashboard at :' + bot.dashboardPort + ' instead.');
+  } finally {
+    setTimeout(() => process.removeListener('uncaughtException', onErr), 8000);
   }
 }
 

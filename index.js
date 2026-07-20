@@ -428,12 +428,37 @@ async function probeBazaarGui(mc, api, cfg) {
   // 1) Main Bazaar browser.
   await openCmd('bz', '/bz  (main Bazaar)');
 
-  // 2) Product page for the current top-ranked flip — the buy/sell/price surface.
+  // 2) Product for the current top-ranked flip. `/bz <item>` opens a SEARCH view;
+  // the product itself is a slot inside it ("click to view details!"), so we click
+  // into it to reach the details page (Buy Order / Sell Offer), then peek the Buy
+  // Order setup (amount/price). We NEVER click Confirm — this places nothing.
   await api.refresh().catch(() => {});
   const top = rank(api.candidates, cfg)[0];
   const itemName = top?.candidate?.displayName;
-  if (itemName) await openCmd('bz ' + itemName, `/bz ${itemName}  (product page)`);
-  else console.log('  [PROBE] (no ranked item for product-page probe)');
+  if (itemName) {
+    const search = await openCmd('bz ' + itemName, `/bz ${itemName}  (search result)`);
+    const pslot = search ? findSlot(search, itemName.toLowerCase()) : -1;
+    if (pslot >= 0) {
+      console.log(`  [PROBE] product "${itemName}" at slot ${pslot} — clicking "view details"`);
+      await mc.clickWindow(pslot, 0, 0);
+      await onceWindow(mc, 4500); await sleep(900);
+      const details = dumpWin(`${itemName} — PRODUCT DETAILS (buy order / sell offer)`);
+
+      const bslot = details ? findSlot(details, 'buy order') : -1;
+      if (bslot >= 0) {
+        console.log(`  [PROBE] "buy order" at slot ${bslot} — opening setup (will NOT confirm)`);
+        await mc.clickWindow(bslot, 0, 0);
+        await onceWindow(mc, 4500); await sleep(900);
+        dumpWin('BUY ORDER setup (amount / price options)');
+      } else if (details) {
+        console.log('  [PROBE] "buy order" not found on details page — real label is one of the names above.');
+      }
+    } else if (search) {
+      console.log(`  [PROBE] product "${itemName}" not found in search result — check the item name.`);
+    }
+  } else {
+    console.log('  [PROBE] (no ranked item for product probe)');
+  }
 
   // 3) Manage Orders grid (find the button in a fresh main Bazaar, click it).
   const main = await openCmd('bz', '/bz  (for Manage Orders)');

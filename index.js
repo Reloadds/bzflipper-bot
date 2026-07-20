@@ -188,11 +188,26 @@ function start() {
   // bytes — Hypixel sees us accept a pack it never sent and drops us. Answer the
   // raw packet with the UUID string from the push, echoing the vanilla status
   // sequence: 3=accepted, 4=downloaded, 0=successfully loaded.
-  const acceptPack = (data) => {
-    console.log(`  >> resource pack ${data.uuid} pushed by server — accepting`);
-    for (const result of [3, 4, 0]) {
-      mc._client.write('resource_pack_receive', { uuid: data.uuid, result });
-    }
+  //
+  // TIMING MATTERS. Packet instrumentation proved every runtime packet we send is
+  // vanilla-normal (valid position at vanilla idle-rate, correct pong/keep_alive,
+  // "vanilla" brand) — so the "badly behaving modifications" kick is NOT movement.
+  // The one non-vanilla thing left was firing 3→4→0 in the SAME millisecond: a
+  // client that "downloads + loads" a pack in 0ms is a textbook cheat-client tell.
+  // Stage the responses over a realistic download interval so it looks like a real
+  // client fetching + applying the pack, not an instant bypass.
+  const acceptPack = async (data) => {
+    console.log(`  >> resource pack ${data.uuid} pushed by server — accepting (staged, realistic timing)`);
+    const send = (result) => {
+      try { mc._client.write('resource_pack_receive', { uuid: data.uuid, result }); }
+      catch (e) { console.log('  resource_pack_receive failed:', e.message); }
+    };
+    send(3);                                            // accepted — immediately (clicked "yes")
+    await sleep(1500 + Math.floor(Math.random() * 1500)); // ~1.5–3s "downloading…"
+    send(4);                                            // downloaded
+    await sleep(400 + Math.floor(Math.random() * 500));   // ~0.4–0.9s "applying…"
+    send(0);                                            // successfully loaded
+    console.log(`  >> resource pack ${data.uuid} accept sequence complete (loaded)`);
   };
   mc._client.on('add_resource_pack', acceptPack);
   mc._client.on('resource_pack_send', acceptPack);

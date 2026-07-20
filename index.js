@@ -16,7 +16,10 @@ import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, score
 import { startHumanize } from './src/humanize.js';
 
 // ---- config ----
-const cfgPath = process.argv[2] || './config.json';
+// First non-flag arg is the config path; flags like --probe are handled separately
+// so `node index.js --probe` still reads ./config.json.
+const cliArgs = process.argv.slice(2);
+const cfgPath = cliArgs.find((a) => !a.startsWith('--')) || './config.json';
 let raw;
 try {
   raw = JSON.parse(readFileSync(cfgPath, 'utf8'));
@@ -53,7 +56,8 @@ const bot = {
   serverAuthoritativePosition: raw.serverAuthoritativePosition !== false,
   // One-shot: on reaching the island, open the Bazaar and dump the real GUI
   // structure (titles/slots/lore) so the S-table string anchors can be verified.
-  guiProbe: raw.guiProbe === true,
+  // Enable via config ("guiProbe": true) OR the `--probe` CLI flag (no JSON edit).
+  guiProbe: raw.guiProbe === true || cliArgs.includes('--probe'),
 };
 
 const fmt = (v) => {

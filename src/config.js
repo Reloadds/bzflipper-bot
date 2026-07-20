@@ -24,8 +24,8 @@ export const defaultConfig = {
   // binding: slots scarce + flips plentiful → raise the gate (each scarce slot
   // lands a fatter flip); capital idle → lower it so the bankroll deploys.
   autoMargin: true,
-  autoMarginMaxBonus: 0.05, // most it may add above apiMinMargin (0 = disabled)
-  autoMarginPeriodSeconds: 120, // how often it may step (0.5%/step, gentle)
+  autoMarginMaxBonus: 0.08, // most it may add above apiMinMargin (0 = disabled) — mod parity
+  autoMarginPeriodSeconds: 300, // how often it may step (0.5%/step, gentle) — mod parity
 
   // Sizing (used by the driver; kept here so the brain can preview order sizes).
   orderVolumeFraction: 0.5,

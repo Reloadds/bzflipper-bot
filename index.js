@@ -136,21 +136,41 @@ function start() {
   // The same wrapper doubles as a black-box tape: the last 40 packets in both
   // directions (plus state changes) are dumped whenever the connection dies,
   // which is the technique that isolated all three socketClosed causes.
+  // Rolling black-box tape. Collapses consecutive identical lines to a count so
+  // the ~1/sec `position` stream doesn't drown out the interesting packets, and
+  // keeps ~200 entries so a full minute of idle traffic before a Watchdog flag
+  // is visible.
   const tape = [];
-  const record = (line) => { tape.push(line); if (tape.length > 40) tape.shift(); };
+  const record = (line) => {
+    const last = tape[tape.length - 1];
+    if (last && last.line === line) { last.n++; return; }
+    tape.push({ line, n: 1 });
+    if (tape.length > 200) tape.shift();
+  };
+  const dumpTape = (title) => {
+    console.log(`  ---- ${title} ----`);
+    for (const e of tape) console.log('  ' + e.line + (e.n > 1 ? `  ×${e.n}` : ''));
+    console.log('  -----------------------------------');
+  };
   {
     const CONFIG_PACKETS = new Set([
       'settings', 'cookie_response', 'custom_payload', 'finish_configuration',
       'keep_alive', 'pong', 'resource_pack_receive', 'select_known_packs',
       'custom_click_action', 'accept_code_of_conduct',
     ]);
+    const MOVE = new Set(['position', 'look', 'position_look', 'flying']);
     const origWrite = mc._client.write.bind(mc._client);
     mc._client.write = (name, params) => {
       if (mc._client.state === 'configuration' && !CONFIG_PACKETS.has(name)) {
         record(`xx blocked [configuration] ${name} (play packet during transfer)`);
         return;
       }
-      record(`>> [${mc._client.state}] ${name}`);
+      // For movement packets, record the actual payload so we can inspect it for
+      // malformation (bad flags, wrong onGround, NaN coords) — this is exactly the
+      // idle traffic Hypixel may be flagging. Identical idle packets collapse.
+      record(MOVE.has(name)
+        ? `>> [${mc._client.state}] ${name} ${JSON.stringify(params)}`
+        : `>> [${mc._client.state}] ${name}`);
       return origWrite(name, params);
     };
   }
@@ -204,6 +224,13 @@ function start() {
     if (position === 'game_info') return; // action-bar spam (health etc.)
     const m = msg.replace(/\s+/g, ' ').trim();
     if (m) console.log(`  [chat] ${m.slice(0, 200)}`);
+    // The "badly behaving modifications" kick is a chat message + server transfer,
+    // NOT a socket close — so the normal end-of-connection tape dump never fires
+    // for it. Dump the tape right here, the instant Hypixel flags us, so we can
+    // SEE exactly which packet(s) preceded the flag instead of guessing.
+    if (/badly behaving|blacklisted mod|sending commands too fast/i.test(m)) {
+      dumpTape('PACKETS BEFORE WATCHDOG FLAG (paste this)');
+    }
   });
   mc.on('kicked', (reason) => {
     const r = typeof reason === 'string' ? reason : JSON.stringify(reason);
@@ -218,9 +245,7 @@ function start() {
     // the backoff collapse to 0s and hammer Hypixel).
     const delay = Math.max(8, Math.min(60, 15 * Math.min(attempts, 4)));
     console.log(`disconnected: ${why} — reconnecting in ${delay}s`);
-    console.log('  ---- last packets before close ----');
-    tape.forEach((l) => console.log('  ' + l));
-    console.log('  -----------------------------------');
+    dumpTape('last packets before close');
     if (attempts <= 1) notify('⚠️ disconnected: ' + why);
     setTimeout(start, delay * 1000);
   });

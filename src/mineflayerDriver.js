@@ -197,10 +197,11 @@ export class MineflayerDriver {
     if (!(await this._navigateTo(item))) return false;
     if (!(await this._clickName(S.CREATE_SELL_OFFER))) return false;
     await onceWindow(this.bot, 4000); await this.pace();
-    // Sell flow mirrors buy (amount → price → confirm). UNVERIFIED past the
-    // details page — the live micro-order corrects the sell screens' titles.
-    if (!(await this._enterAmount(units))) return false;
+    // VERIFIED: the sell flow is PRICE-FIRST — "create sell offer" goes straight to
+    // "at what price are you selling?" (no amount step; it offers what you hold).
     if (!(await this._enterPrice(price))) return false;
+    // If a quantity step does appear after the price (some products), handle it.
+    if (findSlot(this._win(), S.CUSTOM_AMOUNT) >= 0 && !(await this._enterAmount(units))) return false;
     return this._confirm('sell');
   }
 

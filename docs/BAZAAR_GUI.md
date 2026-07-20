@@ -50,7 +50,18 @@ product is a slot inside it. Full path to the trading interface:
 - After picking a price → a **Confirm** screen (UNVERIFIED — only reachable by
   committing; capture during a deliberate live micro-order).
 
+### Sell Offer flow (VERIFIED live) — PRICE-FIRST, no amount step
+`create sell offer` → **`at what price are you selling?`** directly (it offers what
+you hold; there is no "how many" screen like buy has) → pick `custom price` (→ sign)
+or a preset → Confirm screen `confirm sell offer`, button named `sell offer`.
+
+### Order Options (click an order in Your Bazaar Orders) — title `order options`
+- `cancel order` (slot 11) — one click, no confirm popup (returns to the grid)
+- `flip order` (15), `go back` (31)
+
 ### Your Bazaar Orders — title `your bazaar orders`
+- order tile: name `BUY <item>` / `SELL <item>`, lore `Order amount: Nx` /
+  `Price per unit: P coins`; a filled order is `[claimable]` (click to claim).
 - `go back` (to bazaar), `claim all coins` (lore `you don't have any coins to claim.` when none)
 - order tiles populate the grid (none captured yet — account has 0 open orders)
 

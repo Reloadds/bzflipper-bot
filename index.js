@@ -63,6 +63,12 @@ const bot = {
   // locked/seasonal (e.g. essences need Catacombs 20), which blocks the details
   // page. Enchanted Cobblestone has no requirement. Override with "probeItem".
   probeItem: raw.probeItem ?? 'Enchanted Cobblestone',
+  // `--place-test`: walk the full buy flow once on probeItem to verify the sign
+  // input + capture the Confirm screen. DISARMED by default (stops at Confirm,
+  // places nothing). `--confirm` ARMS it → places ONE tiny resting order you must
+  // cancel. Throwaway-alt only.
+  placeTest: cliArgs.includes('--place-test'),
+  placeConfirm: cliArgs.includes('--confirm'),
 };
 
 const fmt = (v) => {
@@ -338,6 +344,11 @@ function start() {
       try { await probeBazaarGui(mc, api, cfg); }
       catch (e) { console.log('  [PROBE] error:', e.message); }
     }
+    // One-shot live write-path test (verifies sign input + Confirm screen).
+    if (bot.placeTest) {
+      try { await placeTest(mc, api, cfg, driver, bot.placeConfirm); }
+      catch (e) { console.log('  [PLACE-TEST] error:', e.message); }
+    }
 
     // Idle head-look presence only makes sense when we actually send rotation
     // packets. With serverAuthoritativePosition on, `look` is suppressed, so
@@ -488,6 +499,29 @@ async function probeBazaarGui(mc, api, cfg) {
 
   await closeWin();
   console.log('========== END PROBE ==========\n');
+}
+
+// ---- LIVE WRITE-PATH TEST: one guarded micro-order ----
+// Walks the full buy flow on a cheap, guaranteed-tradeable item to verify the
+// sign text input and capture the Confirm screen. The order is priced at 60% of
+// the top buy so it can NOT fill (rests until cancelled), and it's 1 unit. With
+// `--confirm` it is actually placed; without it, the driver stops at the Confirm
+// screen and places nothing. Either way the sign/confirm details are logged.
+async function placeTest(mc, api, cfg, driver, armed) {
+  const item = bot.probeItem;
+  console.log('\n========== LIVE PLACE-TEST ==========');
+  driver.armConfirm(armed);
+  const book = await driver.readOrderBook(item);
+  const topBuy = book?.buyOrders?.[0]?.price;
+  if (!topBuy) { console.log(`  [PLACE-TEST] could not read order book for ${item} — aborting`); await driver.closeBook(); return; }
+  const price = Math.max(0.1, Math.floor(topBuy * 0.6 * 10) / 10); // 60% of top → cannot fill
+  console.log(`  [PLACE-TEST] item=${item}  units=1  price=${price} (60% of top buy ${topBuy} — cannot fill, rests until cancelled)`);
+  console.log(`  [PLACE-TEST] confirm=${armed ? 'ARMED — will place a REAL resting order you must cancel' : 'DISARMED — stops at Confirm, places nothing'}`);
+  const r = await driver.placeBuy(item, 1, price);
+  console.log('  [PLACE-TEST] placeBuy →', r);
+  if (armed && r === true) console.log('  [PLACE-TEST] order placed — check Manage Orders, then CANCEL it in-game or via the bot.');
+  await driver.closeBook();
+  console.log('========== END PLACE-TEST ==========\n');
 }
 
 // ---- OBSERVE: read + rank + print, place nothing ----

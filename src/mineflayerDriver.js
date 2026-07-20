@@ -72,7 +72,15 @@ export class MineflayerDriver {
     const onSign = (p) => { this._signLoc = p.location; };
     try { bot._client.on('open_sign_entity', onSign); } catch { /* name varies */ }
     try { bot._client.on('open_sign_editor', onSign); } catch { /* older */ }
+
+    // Safety gate for the final Confirm click. Off by default so the buy/sell
+    // flow can be walked end-to-end (verifying nav + sign) WITHOUT placing a real
+    // order — _confirm dumps the confirm screen and stops. armConfirm(true) is
+    // required for an order to actually be committed.
+    this._armed = false;
   }
+
+  armConfirm(v) { this._armed = !!v; }
 
   _win() { return this.bot.currentWindow; }
   _title() { return componentText(this._win()?.title ?? ''); }
@@ -252,7 +260,12 @@ export class MineflayerDriver {
   async _confirm() {
     const win = this._win();
     this.log('[confirm] window "' + this._title() + '" slots: ' +
-      readWindow(win).map((r) => `${r.slot}:${r.name}`).join(', '));
+      readWindow(win).map((r) => `${r.slot}:"${r.name}"`).join(', '));
+    if (!this._armed) {
+      this.log('[confirm] DISARMED — stopping before the click; NO order placed.');
+      return 'stopped';
+    }
+    this.log('[confirm] ARMED — clicking confirm to place the order.');
     return this._clickName(S.CONFIRM);
   }
 

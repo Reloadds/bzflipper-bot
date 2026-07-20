@@ -73,6 +73,9 @@ const bot = {
   // order) and dump the Order Options menu. DISARMED stops there; `--confirm`
   // arms it to actually cancel the first order (cleans up the place-test order).
   cancelTest: cliArgs.includes('--cancel-test'),
+  // True when any one-shot diagnostic is requested: run only it, then exit, and
+  // mute routine chat/position spam so the diagnostic block is clean to paste.
+  get oneShot() { return this.guiProbe || this.placeTest || this.cancelTest; },
 };
 
 const fmt = (v) => {
@@ -260,7 +263,7 @@ function start() {
   // the server thinks we are from the {7.5,100,7.5} we keep claiming. A big
   // absolute jump = real setback = confirmed desync driving the Watchdog flag.
   mc._client.on('position', (p) => {
-    if (!bot.debugDump) return;
+    if (!bot.debugDump || bot.oneShot) return;
     const flags = typeof p.flags === 'object' ? p.flags : { bitmask: p.flags };
     console.log(`  [SRV-POS] server placed us at x=${p.x} y=${p.y} z=${p.z} yaw=${p.yaw} pitch=${p.pitch} flags=${JSON.stringify(flags)}`);
   });
@@ -291,7 +294,10 @@ function start() {
   mc.on('messagestr', (msg, position) => {
     if (position === 'game_info') return; // action-bar spam (health etc.)
     const m = msg.replace(/\s+/g, ' ').trim();
-    if (m) console.log(`  [chat] ${m.slice(0, 200)}`);
+    // In one-shot diagnostic mode, mute routine chat (lobby joins, announcements,
+    // welcome spam) so the diagnostic block is clean — keep only kicks/warnings.
+    const important = /detected badly behaving|a kick occurred|you must have|too fast|cannot join/i.test(m);
+    if (m && (!bot.oneShot || important)) console.log(`  [chat] ${m.slice(0, 200)}`);
     // The "badly behaving modifications" kick is a chat message + server transfer,
     // NOT a socket close — so the normal end-of-connection tape dump never fires
     // for it. Dump the tape the instant Hypixel flags US. Match the exact kick
@@ -334,7 +340,7 @@ function start() {
     // chunk never parsed on 1.21.11 → mineflayer physics is frozen → we hover at a
     // phantom position the server rejects. If there's air (not solid) below us,
     // we're floating and the server sees a fly hack. This one line tells us which.
-    if (bot.debugDump) setTimeout(() => {
+    if (bot.debugDump && !bot.oneShot) setTimeout(() => {
       const e = mc.entity; if (!e) return;
       const at = mc.blockAt(e.position);
       const below = mc.blockAt(e.position.offset(0, -1, 0));
@@ -357,6 +363,13 @@ function start() {
     if (bot.cancelTest) {
       try { await cancelTest(mc, cfg, driver, bot.placeConfirm); }
       catch (e) { console.log('  [CANCEL-TEST] error:', e.message); }
+    }
+    // One-shot flags run their diagnostic and quit — no observe-loop spam after,
+    // so the block above is the clean tail of the output, easy to copy.
+    if (bot.oneShot) {
+      console.log('\n(one-shot diagnostic done — exiting. Remove the flag to run OBSERVE/LIVE.)');
+      await sleep(300);
+      process.exit(0);
     }
 
     // Idle head-look presence only makes sense when we actually send rotation

@@ -69,6 +69,10 @@ const bot = {
   // cancel. Throwaway-alt only.
   placeTest: cliArgs.includes('--place-test'),
   placeConfirm: cliArgs.includes('--confirm'),
+  // `--cancel-test`: read your open orders (verifies readOrders against a real
+  // order) and dump the Order Options menu. DISARMED stops there; `--confirm`
+  // arms it to actually cancel the first order (cleans up the place-test order).
+  cancelTest: cliArgs.includes('--cancel-test'),
 };
 
 const fmt = (v) => {
@@ -349,6 +353,11 @@ function start() {
       try { await placeTest(mc, api, cfg, driver, bot.placeConfirm); }
       catch (e) { console.log('  [PLACE-TEST] error:', e.message); }
     }
+    // One-shot read+cancel test (verifies readOrders + the Order Options / cancel).
+    if (bot.cancelTest) {
+      try { await cancelTest(mc, cfg, driver, bot.placeConfirm); }
+      catch (e) { console.log('  [CANCEL-TEST] error:', e.message); }
+    }
 
     // Idle head-look presence only makes sense when we actually send rotation
     // packets. With serverAuthoritativePosition on, `look` is suppressed, so
@@ -522,6 +531,40 @@ async function placeTest(mc, api, cfg, driver, armed) {
   if (armed && r === true) console.log('  [PLACE-TEST] order placed — check Manage Orders, then CANCEL it in-game or via the bot.');
   await driver.closeBook();
   console.log('========== END PLACE-TEST ==========\n');
+}
+
+// ---- LIVE READ+CANCEL TEST: verify readOrders + the Order Options / cancel ----
+async function cancelTest(mc, cfg, driver, armed) {
+  console.log('\n========== CANCEL-TEST ==========');
+  driver.armConfirm(armed);
+  if (!(await driver.openBook())) { console.log('  [CANCEL-TEST] could not open Your Bazaar Orders'); return; }
+  const orders = driver.readOrders();
+  console.log(`  [CANCEL-TEST] readOrders() → ${orders.length} order(s):`);
+  orders.forEach((o) => console.log(`    ${o.side} "${o.item}" ${o.amount}x @ ${o.price} filled ${o.filledPct}%${o.claimable ? ' [claim]' : ''} (slot ${o._slot})`));
+  if (!orders.length) { console.log('  [CANCEL-TEST] no open orders — place one first with --place-test --confirm'); await driver.closeBook(); return; }
+
+  // Open the first order's options menu and dump it (verify the cancel button).
+  const target = orders[0];
+  await mc.clickWindow(target._slot, 0, 0);
+  await onceWindow(mc, 4000); await sleep(900);
+  const opts = mc.currentWindow;
+  console.log('  [CANCEL-TEST] Order Options "' + componentText(opts?.title ?? '') + '": ' +
+    readWindow(opts).map((r) => `${r.slot}:"${r.name}"`).join(', '));
+  const cancelHit = readWindow(opts).find((r) => r.name.includes('cancel') && r.name.includes('order'));
+  if (!cancelHit) { console.log('  [CANCEL-TEST] no cancel button found in options — see names above'); await driver.closeBook(); return; }
+  if (!armed) {
+    console.log(`  [CANCEL-TEST] DISARMED — would click slot ${cancelHit.slot} ("${cancelHit.name}"); order NOT cancelled.`);
+    await driver.closeBook(); console.log('========== END CANCEL-TEST ==========\n'); return;
+  }
+  console.log(`  [CANCEL-TEST] ARMED — clicking slot ${cancelHit.slot} ("${cancelHit.name}") to cancel.`);
+  await mc.clickWindow(cancelHit.slot, 0, 0);
+  await sleep(1200);
+  // Some flows pop a confirm; dump whatever window we land on for visibility.
+  if (mc.currentWindow) console.log('  [CANCEL-TEST] post-cancel window "' + componentText(mc.currentWindow.title ?? '') + '": ' +
+    readWindow(mc.currentWindow).map((r) => `${r.slot}:"${r.name}"`).join(', '));
+  console.log('  [CANCEL-TEST] done — verify the order is gone + coins refunded in-game.');
+  await driver.closeBook();
+  console.log('========== END CANCEL-TEST ==========\n');
 }
 
 // ---- OBSERVE: read + rank + print, place nothing ----

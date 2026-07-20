@@ -102,11 +102,16 @@ export function pickNext(candidates, cfg, state = {}) {
  * idle, the volume cap relaxes toward maxOrderVolumeFraction. Port of pBuyAmount.
  * @returns {{units:number, binding:string, byPurse:number, byVolume:number, byKelly:number}}
  */
-export function orderSize(c, cfg, { purse, deployedBuyCapital = 0, stackSize = 64, freeInvSlots = 30 } = {}) {
+export function orderSize(c, cfg, { purse, deployedBuyCapital = 0, stackSize = 64, freeInvSlots = 30, budget } = {}) {
   const ourBuy = c.ourBuyPrice();
   const spendable = Math.max(0, (purse ?? 0) - cfg.coinReserve);
-  // perOrderBudget: spendable split across free slots, capped by orderBudgetFraction.
-  const perOrder = Math.min(spendable, spendable * clamp(cfg.orderBudgetFraction, 0.05, 1));
+  // Per-order budget. Use the caller's EVEN-SPLIT budget (spendable ÷ free slots,
+  // capped by orderBudgetFraction) when given, so capital spreads across the whole
+  // book — without it, one order would eat orderBudgetFraction (e.g. 50%) of the
+  // entire purse and starve the other slots. Fall back to the fraction cap.
+  const perOrder = (budget != null && budget > 0)
+    ? budget
+    : Math.min(spendable, spendable * clamp(cfg.orderBudgetFraction, 0.05, 1));
 
   const byPurse = PriceMath.affordableUnits(perOrder, ourBuy, cfg.maxUnitsPerOrder);
 

@@ -266,10 +266,12 @@ export class StateMachine {
 
     // 5) Open a new buy with the best-ranked flip we don't hold.
     if (grid.length < this.orderLimit && purse > 0 && !Number.isNaN(purse)) {
+      const budget = this.perOrderBudget(purse, grid); // even split across free slots
       const pick = pickNext(this.api.candidates, this.cfg, this.brainState());
-      if (pick && pick.ourBuyPrice() <= this.perOrderBudget(purse, grid)) {
+      if (pick && pick.ourBuyPrice() <= budget) {
         const size = orderSize(pick, this.cfg, {
           purse,
+          budget, // size THIS order to its slice of capital, not 50% of the purse
           deployedBuyCapital: this.deployedBuyCapital(grid),
           freeInvSlots: this.driver.freeInventorySlots(),
           stackSize: 64,

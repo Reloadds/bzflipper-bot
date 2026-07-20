@@ -4,9 +4,21 @@
 
 import http from 'node:http';
 
-export function startDashboard({ port = 3000, getState, log = () => {} }) {
+export function startDashboard({ port = 3000, getState, onConfig = null, log = () => {} }) {
   const server = http.createServer((req, res) => {
     try {
+      if (req.method === 'POST' && req.url.startsWith('/api/config')) {
+        let body = '';
+        req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const applied = onConfig ? onConfig(JSON.parse(body || '{}')) : {};
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, applied }));
+          } catch (e) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: e.message })); }
+        });
+        return;
+      }
       if (req.url.startsWith('/api/state')) {
         const body = JSON.stringify(getState());
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -65,6 +77,13 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   #log .l{color:var(--dim)}
   .empty{padding:16px 14px;color:var(--dim)}
   a{color:var(--acc2)}
+  .knobs{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 14px;padding:12px 14px}
+  .knob{display:flex;flex-direction:column;gap:3px}
+  .knob label{font-size:11px;color:var(--dim)}
+  .knob input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:6px 8px;font:13px ui-monospace,SFMono-Regular,Consolas,monospace}
+  .save-row{padding:10px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  button{background:var(--acc);color:#04140a;border:none;border-radius:7px;padding:7px 14px;font-weight:700;cursor:pointer}
+  button:hover{filter:brightness(1.1)}
 </style></head><body>
 <header>
   <h1>⚡ bzflipper-bot</h1>
@@ -83,6 +102,11 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <div class="card"><div class="k">Open orders</div><div class="v" id="ordn">—</div></div>
     <div class="card"><div class="k">Session profit</div><div class="v" id="profit">—</div><div class="k" id="flips"></div></div>
   </div>
+  <div class="panel" style="margin-bottom:16px">
+    <h2>Tuning — edit live <span id="saved" class="muted" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <div id="knobs" class="knobs"></div>
+    <div class="save-row"><button id="save">Save &amp; apply</button><span class="muted">applies on the next tick and persists to config.json</span></div>
+  </div>
   <div class="grid2">
     <div class="panel"><h2>Top flips (coins/hr)</h2><div id="flipsWrap"></div></div>
     <div class="panel"><h2>Open orders</h2><div id="ordersWrap"></div></div>
@@ -91,6 +115,15 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 </main>
 <script>
 const $=id=>document.getElementById(id);
+const KNOBS=[['apiMinMargin','Min margin (frac)',0.005],['apiMaxMargin','Max margin (frac)',0.01],['apiMinWeeklyVolume','Min weekly volume',10000],['minEfficiency','Min efficiency',0.05],['orderLimit','Order slots',1],['orderBudgetFraction','Budget fraction',0.05],['coinReserve','Coin reserve',1000000],['minOrderValue','Min order value',50000]];
+let knobsBuilt=false;
+function syncKnobs(cfg){if(!cfg)return;
+  if(!knobsBuilt){$('knobs').innerHTML=KNOBS.map(([k,l,s])=>'<div class="knob"><label>'+l+'</label><input data-k="'+k+'" type="number" step="'+s+'" value="'+(cfg[k]??'')+'"></div>').join('');knobsBuilt=true;return;}
+  for(const [k] of KNOBS){const el=document.querySelector('input[data-k="'+k+'"]');if(el&&document.activeElement!==el)el.value=cfg[k];}}
+async function saveKnobs(){const patch={};document.querySelectorAll('#knobs input').forEach(el=>{const v=parseFloat(el.value);if(!isNaN(v))patch[el.dataset.k]=v});
+  try{const r=await (await fetch('/api/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(patch)})).json();
+    $('saved').textContent=r.ok?('✓ saved '+Object.keys(r.applied).length+' at '+new Date().toLocaleTimeString()):('✗ '+r.error);}
+  catch(e){$('saved').textContent='✗ '+e.message;}}
 const fmt=v=>{if(v==null||isNaN(v))return '—';const a=Math.abs(v);if(a>=1e9)return (v/1e9).toFixed(2)+'B';if(a>=1e6)return (v/1e6).toFixed(2)+'M';if(a>=1e3)return (v/1e3).toFixed(1)+'k';return Math.round(v)};
 const dur=s=>{s=Math.max(0,Math.floor(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?h+'h '+m+'m':m+'m '+(s%60)+'s'};
 function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
@@ -121,6 +154,8 @@ async function tick(){
   const lg=$('log'), atBottom=lg.scrollTop+lg.clientHeight>=lg.scrollHeight-30;
   lg.innerHTML=(s.logs||[]).map(l=>'<div><span class="l">'+esc(l.t)+'</span> '+esc(l.line)+'</div>').join('');
   if(atBottom)lg.scrollTop=lg.scrollHeight;
+  syncKnobs(s.config);
 }
+$('save').onclick=saveKnobs;
 tick(); setInterval(tick,2000);
 </script></body></html>`;

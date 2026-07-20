@@ -5,7 +5,7 @@
 //     the most detectable form. Use a THROWAWAY alt. OBSERVE mode (dryRun:true,
 //     the default) only reads + ranks and places nothing — start there.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import mineflayer from 'mineflayer';
 import { BazaarApi, norm } from './src/bazaarApi.js';
 import { makeConfig } from './src/config.js';
@@ -137,14 +137,39 @@ function dashState() {
         .map((r) => ({ name: r.candidate.displayName, cph: r.cph, margin: r.candidate.margin(cfg.taxFraction), velocity: r.velocity }));
     }
   } catch { /* ranking not ready */ }
+  const config = {};
+  for (const k of TUNABLE) config[k] = cfg[k];
   return {
     status: dash.status, mode: bot.dryRun ? 'OBSERVE' : 'LIVE', username: bot.username,
     uptimeSec: (Date.now() - startedAt) / 1000, apiAgeSec: ctx.api ? ctx.api.ageSeconds() : null,
-    purse, cookieH, orders: dash.orders, session: ctx.sm?.session ?? dash.session, flips,
+    purse, cookieH, orders: dash.orders, session: ctx.sm?.session ?? dash.session, flips, config,
     logs: logRing.slice(-150),
   };
 }
-if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, log: console.log });
+
+// Strategy knobs the dashboard may edit live. cfg is passed by reference to the
+// brain + state machine, so mutating it here takes effect on the next tick.
+const TUNABLE = ['apiMinMargin', 'apiMaxMargin', 'apiMinWeeklyVolume', 'minEfficiency',
+  'orderLimit', 'orderBudgetFraction', 'coinReserve', 'minOrderValue'];
+function applyConfig(patch) {
+  const applied = {};
+  for (const k of TUNABLE) {
+    if (patch[k] == null) continue;
+    const n = Number(patch[k]);
+    if (!Number.isFinite(n) || n < 0) continue;
+    cfg[k] = n; applied[k] = n;
+  }
+  if (Object.keys(applied).length) {
+    try { // persist into config.json's strategy so it survives a restart
+      const raw2 = JSON.parse(readFileSync(cfgPath, 'utf8'));
+      raw2.strategy = { ...(raw2.strategy ?? {}), ...applied };
+      writeFileSync(cfgPath, JSON.stringify(raw2, null, 2) + '\n');
+    } catch (e) { console.log('config save failed:', e.message); }
+    console.log('⚙️  config updated live:', JSON.stringify(applied));
+  }
+  return applied;
+}
+if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, onConfig: applyConfig, log: console.log });
 
 console.log(`bzflipper-bot — ${bot.dryRun ? 'OBSERVE (dry run — no orders)' : '\x1b[31mLIVE TRADING\x1b[0m'} — ${bot.host} as ${bot.username}`);
 

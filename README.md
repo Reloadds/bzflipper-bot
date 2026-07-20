@@ -67,6 +67,11 @@ by default — no extra dependencies, just open it in a browser. It live-updates
   OBSERVE with `"readOrdersGui": true`)
 - **session profit / flips** (LIVE)
 - a rolling **log console**
+- a **Tuning panel** to edit the strategy gates **live** — min/max margin, min weekly
+  volume, min efficiency, order slots, budget fraction, coin reserve, min order
+  value. Changes apply on the next tick (cfg is read live) and persist to
+  `config.json`. The engine already maximizes realized coins/hr (fill-aware series
+  velocity + learned efficiency); these gates let you steer the risk/liquidity band.
 
 Set the port with `"dashboardPort"` (default `3000`; `0` or `false` disables it).
 On a remote box, tunnel it: `ssh -L 3000:localhost:3000 user@your-host`.

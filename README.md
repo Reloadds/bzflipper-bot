@@ -101,25 +101,28 @@ alerts — sign-in prompts, connect/disconnect, kicks, and a periodic status lin
 (purse · orders · top flip) every `webhookStatusMin` minutes. Leave it `""` to
 disable. This is the "run it 24/7 on a VPS and watch from your phone" workflow.
 
-## "Badly behaving modifications" kicks — what actually causes them
+## "Badly behaving modifications" kicks — root cause (SOLVED)
 
-If Hypixel kicks you to the lobby with *"We have detected badly behaving
-modifications…"*, it is **not** your movement/physics and **not** a ban — it's the
-anti-cheat flagging **automated menu clicking**. Current Hypixel builds flag rapid
-or non-human GUI interaction (fast clicks, middle-click, quick inventory moves);
-mineflayer navigating the Bazaar menu tick-fast looks exactly like that. This repo
-mitigates it:
+If Hypixel repeatedly kicks you to the lobby with *"We have detected badly behaving
+modifications…"* — it is **not** a ban and **not** GUI clicking. The confirmed
+cause (found by dumping the outgoing packet tape at the moment of the kick) is a
+**position desync**:
 
-- **OBSERVE mode clicks nothing.** Purse, cookie and prices come from the
-  scoreboard, tab list and public API — no GUI is opened. Reading your own open
-  orders (which *does* need the menu) is opt-in via `"readOrdersGui": true`, and
-  even then the bot human-paces the clicks and closes the menu afterward.
-- **Every menu click is human-paced** — a randomized ~0.55–1.2s beat
-  (`clickDelayMs` / `clickJitterMs`), only left-click, never middle/shift-click.
-- **Menus are closed when done**, instead of sitting open and re-clicked each cycle.
+- On 1.21.11 (translated server-side by ViaVersion), mineflayer **never loads the
+  SkyBlock chunks** — `loadedColumns=0`. With no world data, its physics can't
+  compute a valid `onGround`, so it streams an oscillating/invalid `position`
+  (`onGround` flipping true/false while standing still). The server rejects that as
+  impossible movement → the Watchdog "modifications" kick.
 
-Movement/physics is left at mineflayer defaults — standing still is fine; it was
-never the trigger.
+**Fix:** `serverAuthoritativePosition` (default `true`). This bot only ever stands
+and drives menus, so it **never sends its own position** — the periodic
+`position`/`look`/`flying` packets are dropped and the server owns our location.
+`teleport_confirm` + the post-teleport `position_look` are kept so teleports still
+complete. No self-reported position → nothing for the anti-cheat to reject.
+
+The unloaded chunks don't affect trading — the Bazaar path only needs the
+scoreboard, tab list, chat and GUI windows, all of which work without world data.
+Turn on `"debugDump": true` to see the `[WORLD]` / `[SRV-POS]` diagnostics.
 
 ## How the connection works (no proxy needed)
 

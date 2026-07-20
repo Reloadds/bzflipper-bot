@@ -232,6 +232,7 @@ function start() {
   // the server thinks we are from the {7.5,100,7.5} we keep claiming. A big
   // absolute jump = real setback = confirmed desync driving the Watchdog flag.
   mc._client.on('position', (p) => {
+    if (!bot.debugDump) return;
     const flags = typeof p.flags === 'object' ? p.flags : { bitmask: p.flags };
     console.log(`  [SRV-POS] server placed us at x=${p.x} y=${p.y} z=${p.z} yaw=${p.yaw} pitch=${p.pitch} flags=${JSON.stringify(flags)}`);
   });
@@ -303,7 +304,7 @@ function start() {
     // chunk never parsed on 1.21.11 → mineflayer physics is frozen → we hover at a
     // phantom position the server rejects. If there's air (not solid) below us,
     // we're floating and the server sees a fly hack. This one line tells us which.
-    setTimeout(() => {
+    if (bot.debugDump) setTimeout(() => {
       const e = mc.entity; if (!e) return;
       const at = mc.blockAt(e.position);
       const below = mc.blockAt(e.position.offset(0, -1, 0));

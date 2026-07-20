@@ -448,14 +448,23 @@ async function probeBazaarGui(mc, api, cfg) {
       await onceWindow(mc, 4500); await sleep(900);
       const details = dumpWin(`${itemName} — PRODUCT DETAILS (buy order / sell offer)`);
 
-      const bslot = details ? findSlot(details, 'buy order') : -1;
+      const bslot = details ? findSlot(details, 'create buy order') : -1;
       if (bslot >= 0) {
-        console.log(`  [PROBE] "buy order" at slot ${bslot} — opening setup (will NOT confirm)`);
+        console.log(`  [PROBE] "create buy order" at slot ${bslot} — opening amount setup (will NOT confirm)`);
         await mc.clickWindow(bslot, 0, 0);
         await onceWindow(mc, 4500); await sleep(900);
-        dumpWin('BUY ORDER setup (amount / price options)');
+        const setup = dumpWin('BUY ORDER amount setup ("how many do you want?")');
+        // One level deeper to the PRICE screen. Picking a preset amount places
+        // NOTHING — a buy order exists only after a final Confirm we never click.
+        const aslot = setup ? findSlot(setup, 'buy a stack') : -1;
+        if (aslot >= 0) {
+          console.log(`  [PROBE] "buy a stack!" at slot ${aslot} — proceeding to PRICE screen (will NOT confirm)`);
+          await mc.clickWindow(aslot, 0, 0);
+          await onceWindow(mc, 4500); await sleep(900);
+          dumpWin('BUY ORDER price screen (will NOT confirm — safe)');
+        }
       } else if (details) {
-        console.log('  [PROBE] "buy order" not found on details page — real label is one of the names above.');
+        console.log('  [PROBE] "create buy order" not found on details page.');
       }
     } else if (search) {
       console.log(`  [PROBE] product "${itemName}" not found in search result — check the item name.`);

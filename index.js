@@ -7,7 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import mineflayer from 'mineflayer';
-import { BazaarApi } from './src/bazaarApi.js';
+import { BazaarApi, norm } from './src/bazaarApi.js';
 import { makeConfig } from './src/config.js';
 import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
@@ -73,9 +73,15 @@ const bot = {
   // order) and dump the Order Options menu. DISARMED stops there; `--confirm`
   // arms it to actually cancel the first order (cleans up the place-test order).
   cancelTest: cliArgs.includes('--cancel-test'),
+  // `--cycle-test`: one full supervised flip — buy the item, poll until it fills,
+  // claim, then place a sell offer. DRY preview unless `--confirm`. Real coins.
+  cycleTest: cliArgs.includes('--cycle-test'),
+  cycleItem: raw.cycleItem ?? 'Enchanted Cobblestone',
+  cycleUnits: raw.cycleUnits ?? 1,
+  cycleTimeoutMin: raw.cycleTimeoutMin ?? 15,
   // True when any one-shot diagnostic is requested: run only it, then exit, and
   // mute routine chat/position spam so the diagnostic block is clean to paste.
-  get oneShot() { return this.guiProbe || this.placeTest || this.cancelTest; },
+  get oneShot() { return this.guiProbe || this.placeTest || this.cancelTest || this.cycleTest; },
 };
 
 const fmt = (v) => {
@@ -364,6 +370,11 @@ function start() {
       try { await cancelTest(mc, cfg, driver, bot.placeConfirm); }
       catch (e) { console.log('  [CANCEL-TEST] error:', e.message); }
     }
+    // One full supervised flip: buy → wait for fill → claim → sell.
+    if (bot.cycleTest) {
+      try { await cycleTest(mc, api, cfg, driver, bot.placeConfirm); }
+      catch (e) { console.log('  [CYCLE-TEST] error:', e.message); }
+    }
     // One-shot flags run their diagnostic and quit — no observe-loop spam after,
     // so the block above is the clean tail of the output, easy to copy.
     if (bot.oneShot) {
@@ -578,6 +589,74 @@ async function cancelTest(mc, cfg, driver, armed) {
   console.log('  [CANCEL-TEST] done — verify the order is gone + coins refunded in-game.');
   await driver.closeBook();
   console.log('========== END CANCEL-TEST ==========\n');
+}
+
+// ---- ONE-CYCLE LIVE TEST: buy → wait for fill → claim → sell ----
+// The supervised end-to-end flip. Buys `cycleUnits` of `cycleItem` at a price near
+// the lowest sell so it fills fast, polls Manage Orders until filled, claims the
+// goods, then places a sell offer undercutting the lowest sell. DRY (nothing
+// placed) unless armed with --confirm. Real coins on a throwaway alt only.
+async function cycleTest(mc, api, cfg, driver, armed) {
+  const round1 = (x) => Math.round(x * 10) / 10;
+  const item = bot.cycleItem;
+  const units = Math.max(1, Math.round(bot.cycleUnits));
+  const mine = (orders) => orders.find((o) => o.side === 'buy' && norm(o.item) === norm(item));
+  console.log('\n========== ONE-CYCLE LIVE TEST ==========');
+  console.log(`  item=${item}  units=${units}  timeout=${bot.cycleTimeoutMin}m  ${armed ? '\x1b[31mARMED (real coins)\x1b[0m' : 'DRY (preview only)'}`);
+  driver.armConfirm(armed);
+
+  const book = await driver.readOrderBook(item);
+  await driver.closeBook();
+  if (!book?.buyOrders?.length || !book?.sellOffers?.length) { console.log('  [CYCLE] order book unreadable — aborting'); return; }
+  const topBuy = book.buyOrders[0].price, topSell = book.sellOffers[0].price;
+  const buyPrice = round1(topSell - 0.1);   // near lowest sell → we're the best buy → fills fast
+  const sellPrice = round1(topSell - 0.1);  // undercut lowest sell so our sell can fill too
+  console.log(`  [CYCLE] book: topBuy=${topBuy} topSell=${topSell}  →  BUY @ ${buyPrice}  (~${Math.round(buyPrice * units)} coins), later SELL @ ${sellPrice}`);
+
+  if (!armed) { console.log('  [CYCLE] DRY — nothing placed. Re-run with --confirm to execute for real.'); console.log('========== END (dry) ==========\n'); return; }
+
+  // 1) BUY
+  console.log('  [CYCLE 1/4] placing buy order…');
+  if (await driver.placeBuy(item, units, buyPrice) !== true) { console.log('  [CYCLE] buy failed — aborting'); await driver.closeBook(); return; }
+  console.log('  [CYCLE] buy placed — polling for fill (every 15s)…');
+
+  // 2) WAIT FOR FILL
+  const deadline = Date.now() + bot.cycleTimeoutMin * 60_000;
+  let filled = false;
+  while (Date.now() < deadline) {
+    await sleep(15000);
+    if (!(await driver.openBook())) continue;
+    const o = mine(driver.readOrders());
+    await driver.closeBook();
+    if (!o) { console.log('  [CYCLE] buy order gone from grid — treating as filled'); filled = true; break; }
+    console.log(`  [CYCLE] …fill ${o.filledPct}%${o.claimable ? ' [claimable]' : ''}`);
+    if (o.filledPct >= 100 || o.claimable) { filled = true; break; }
+  }
+  if (!filled) {
+    console.log('  [CYCLE] timed out — cancelling the buy to clean up.');
+    if (await driver.openBook()) { const o = mine(driver.readOrders()); if (o) await driver.cancel(o); await driver.closeBook(); }
+    console.log('========== END (timeout) ==========\n'); return;
+  }
+
+  // 3) CLAIM
+  console.log('  [CYCLE 3/4] claiming filled goods…');
+  if (await driver.openBook()) {
+    const o = mine(driver.readOrders());
+    if (o) console.log('  [CYCLE] claim →', await driver.claim(o));
+    await driver.closeBook();
+  }
+  await sleep(1500);
+  console.log('  [CYCLE] inventory free slots now:', driver.freeInventorySlots());
+
+  // 4) SELL
+  console.log('  [CYCLE 4/4] placing sell offer…');
+  const okSell = await driver.placeSell(item, units, sellPrice);
+  console.log('  [CYCLE] placeSell →', okSell);
+  await driver.closeBook();
+  console.log(okSell === true
+    ? '  [CYCLE] ✅ full cycle done — buy filled, claimed, sell offer placed. Verify in-game.'
+    : '  [CYCLE] sell leg did not complete — the logs above show which screen; paste them.');
+  console.log('========== END ONE-CYCLE ==========\n');
 }
 
 // ---- OBSERVE: read + rank + print, place nothing ----

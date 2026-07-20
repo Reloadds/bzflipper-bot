@@ -249,19 +249,24 @@ export class MineflayerDriver {
     return findSlot(this._win(), S.CREATE_BUY_ORDER) >= 0 || findSlot(this._win(), S.CREATE_SELL_OFFER) >= 0;
   }
 
-  /** Amount screen "how many do you want?": type an exact quantity via the sign. */
+  /** Amount screen (buy: "how many do you want?"; sell may differ): type an exact
+   *  quantity via the sign. Adapts by BUTTON name, not title, so the sell flow
+   *  (unverified screen titles) still works — the title is only logged. */
   async _enterAmount(units) {
-    if (!this._title().includes(S.AMOUNT_TITLE)) { this.log('[amount] wrong screen: ' + this._title()); return false; }
-    if (!(await this._clickName(S.CUSTOM_AMOUNT))) return false;
+    const t = this._title();
+    if (!t.includes(S.AMOUNT_TITLE)) this.log(`[amount] screen "${t}" — proceeding by "custom amount" button`);
+    if (!(await this._clickName(S.CUSTOM_AMOUNT))) { this.log(`[amount] no "custom amount" on "${t}"`); return false; }
     if (!(await this._sign(String(Math.max(1, Math.round(units)))))) return false;
     await onceWindow(this.bot, 4000); await this.pace();
-    return this._title().includes(S.PRICE_TITLE);
+    return true; // next screen is the price screen
   }
 
-  /** Price screen "how much do you want to pay?": type an exact price via the sign. */
+  /** Price screen (buy: "how much do you want to pay?"; sell differs): type an
+   *  exact price via the sign. Adapts by "custom price" button, title logged. */
   async _enterPrice(price) {
-    if (!this._title().includes(S.PRICE_TITLE)) { this.log('[price] wrong screen: ' + this._title()); return false; }
-    if (!(await this._clickName(S.CUSTOM_PRICE))) return false;
+    const t = this._title();
+    if (!t.includes(S.PRICE_TITLE)) this.log(`[price] screen "${t}" — proceeding by "custom price" button`);
+    if (!(await this._clickName(S.CUSTOM_PRICE))) { this.log(`[price] no "custom price" on "${t}"`); return false; }
     if (!(await this._sign(price.toFixed(1)))) return false;
     await onceWindow(this.bot, 4000); await this.pace();
     return true; // now on the confirm screen

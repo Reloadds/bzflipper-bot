@@ -38,8 +38,10 @@ export const S = {
   SAME_AS_TOP: 'same as top order',
   TOP_ORDER_PLUS: 'top order +0.1',
   CUSTOM_PRICE: 'custom price',
-  // confirm screen — UNVERIFIED (label guessed; corrected during live micro-order)
-  CONFIRM: 'confirm',
+  // confirm screen (title "confirm buy order"/"confirm sell offer") — VERIFIED:
+  // the confirm button is named "buy order"/"sell offer", NOT "confirm".
+  CONFIRM_BUY: 'buy order',
+  CONFIRM_SELL: 'sell offer',
   // Your Bazaar Orders grid — title "your bazaar orders"
   ORDERS_TITLE: 'your bazaar orders',
   CLAIM_ALL: 'claim all coins',
@@ -182,7 +184,7 @@ export class MineflayerDriver {
     await onceWindow(this.bot, 4000); await this.pace();
     if (!(await this._enterAmount(units))) return false;                 // → price screen
     if (!(await this._enterPrice(price))) return false;                  // → confirm screen
-    return this._confirm();
+    return this._confirm('buy');
   }
 
   async placeSell(item, units, price) {
@@ -193,7 +195,7 @@ export class MineflayerDriver {
     // details page — the live micro-order corrects the sell screens' titles.
     if (!(await this._enterAmount(units))) return false;
     if (!(await this._enterPrice(price))) return false;
-    return this._confirm();
+    return this._confirm('sell');
   }
 
   async instasell(item) {
@@ -255,18 +257,24 @@ export class MineflayerDriver {
     return true; // now on the confirm screen
   }
 
-  /** Confirm screen — UNVERIFIED label. Click the confirm/green tile. The live
-   *  micro-order prints this window so S.CONFIRM can be corrected if needed. */
-  async _confirm() {
+  /** Confirm screen (title "confirm buy order" / "confirm sell offer"). VERIFIED:
+   *  the confirm button is named "buy order" / "sell offer" (slot 13), NOT
+   *  "confirm" — and a "cancel buy order" tile also contains the term, so exclude
+   *  cancel/create/go-back. Gated behind armConfirm(): disarmed → dumps + stops. */
+  async _confirm(kind) {
     const win = this._win();
+    const term = kind === 'sell' ? S.CONFIRM_SELL : S.CONFIRM_BUY;
     this.log('[confirm] window "' + this._title() + '" slots: ' +
       readWindow(win).map((r) => `${r.slot}:"${r.name}"`).join(', '));
+    const hit = readWindow(win).find((r) =>
+      r.name.includes(term) && !r.name.includes('cancel') && !r.name.includes('create') && !r.name.includes('go back'));
+    if (!hit) { this.log(`[confirm] confirm button ("${term}") not found`); return false; }
     if (!this._armed) {
-      this.log('[confirm] DISARMED — stopping before the click; NO order placed.');
+      this.log(`[confirm] DISARMED — would click slot ${hit.slot} ("${hit.name}"); NO order placed.`);
       return 'stopped';
     }
-    this.log('[confirm] ARMED — clicking confirm to place the order.');
-    return this._clickName(S.CONFIRM);
+    this.log(`[confirm] ARMED — clicking slot ${hit.slot} ("${hit.name}") to place the ${kind} order.`);
+    return this._clickSlot(hit.slot);
   }
 
   /** Type text into the sign editor Hypixel opens for custom amount/price. Uses

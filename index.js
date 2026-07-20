@@ -227,30 +227,16 @@ function start() {
 
   mc.once('spawn', async () => {
     everSpawned = true;         // we made it into the world — real drops now reconnect
-    mc.physicsEnabled = true;   // ON at spawn so gravity settles us onto solid ground
+    mc.physicsEnabled = true;   // normal client physics. Standing still is NOT what
+                                // triggers the "badly behaving modifications" kick —
+                                // automated Bazaar-MENU CLICKING is (see driver).
     console.log('✅ spawned in-world. Heading to SkyBlock…');
     if (bot.viewer) await startViewer(mc);
 
     await joinSkyblockIsland(mc);
 
-    // ── Freeze physics (fix for Hypixel "badly behaving modifications") ────────
-    // On 1.21.11 prismarine-physics' client-side prediction diverges from
-    // Hypixel's server physics, so the `position` packets mineflayer streams
-    // every tick — even standing perfectly still — read as invalid movement and
-    // Watchdog kicks with "badly behaving modifications". Now that we're grounded
-    // on the island, turn physics OFF: mineflayer stops predicting and streaming
-    // position, and the bot simply holds whatever position the server teleports
-    // it to (server-authoritative). Nothing client-originated = nothing to flag.
-    // Chat-based navigation (/play, /is) and GUI clicks don't need physics.
-    if (bot.freezePhysics !== false) {
-      try { await mc.waitForTicks(20); } catch {}   // ~1s to settle onto the floor
-      mc.physicsEnabled = false;
-      try { mc.clearControlStates(); } catch {}
-      console.log('physics: FROZEN — server-authoritative position (avoids 1.21.11 movement flags)');
-    } else if (bot.humanize) {
-      // Idle head-look presence only runs when physics is live (bot.look needs
-      // the physics tick to emit rotation packets). With physics frozen the bot
-      // is intentionally a still, server-parked entity.
+    // Optional idle head-look presence (rotation packets only — never flagged).
+    if (bot.humanize) {
       startHumanize(mc, { log: bot.debugDump ? console.log : () => {} });
       console.log('humanize: on (idle head-look only, no body movement)');
     }
@@ -321,8 +307,19 @@ async function observeLoop(mc, api, driver, cfg, alive) {
       await api.refresh();
       const purse = driver.readPurse();
       const cookie = driver.readCookieRemainMs();
-      await driver.openBook();
-      const grid = driver.readOrders();
+      // Reading your OPEN ORDERS requires opening + CLICKING the Bazaar menu, and
+      // Hypixel's anti-cheat flags automated menu clicks as "badly behaving
+      // modifications" (kick-to-lobby). Observe mode is read-only by design, so
+      // by default it does ZERO clicking: purse comes from the scoreboard, cookie
+      // from the tab list, prices from the public API — no GUI touched, nothing
+      // to flag. Set "readOrdersGui": true only if you want the live open-orders
+      // grid too and accept that click risk; even then we human-pace and close.
+      let grid = [];
+      if (bot.readOrdersGui) {
+        await driver.openBook();
+        grid = driver.readOrders();
+        await driver.closeBook();
+      }
       const rows = rank(api.candidates, cfg).slice(0, 12);
 
       console.log(`\n── ${new Date().toISOString().slice(11, 19)} · purse ${fmt(purse)} · cookie ${cookie < 0 ? '?' : Math.round(cookie / 36e5) + 'h'} · api ${api.ageSeconds()}s · orders ${grid.length}`);

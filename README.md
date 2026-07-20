@@ -19,7 +19,7 @@ actions against a live `bot`.
 
 | Mode | `dryRun` | What it does | Risk |
 |---|---|---|---|
-| **OBSERVE** *(default)* | `true` | Logs in, gets on SkyBlock, reads your purse / cookie / open orders, fetches the live Bazaar and prints the ranked flips. **Places nothing.** | Read-only. Safe study. Start here. |
+| **OBSERVE** *(default)* | `true` | Logs in, gets on SkyBlock, reads your purse (scoreboard) + cookie (tab list) and fetches the live Bazaar from the public API, then prints the ranked flips. **No GUI is opened, nothing is clicked, nothing is placed.** | Read-only, zero-click. Safe study. Start here. |
 | **LIVE** | `false` | Runs the state machine — places, claims, relists, and cancels **real orders with real coins**. | Real automation. Ban risk. |
 
 ## Setup
@@ -85,14 +85,10 @@ manually (or `cookieRefreshEnabled: false`, the default).
 ## Config (`config.json`)
 
 - `username` — your Microsoft **email** (not the gamertag), `auth: "microsoft"`.
-- `version` — protocol to connect with (default `"1.21.11"`, which Hypixel
-  requires for login). Known issue: mineflayer can die silently in the
-  login→configuration handoff on Hypixel
-  ([mineflayer#3775](https://github.com/PrismarineJS/mineflayer/issues/3775)
-  family; telltale: `[login] success` → `socketClosed` while the account lingers
-  online — the server is still waiting for the client). If direct connect won't
-  handshake, run with `"logPackets": true` to capture the `>>`/`==` trace, or
-  point `host`/`port` at a working proxy (ViaProxy), which handles this phase.
+- `version` — protocol to connect with (default `"1.21.11"`). Direct connection
+  works: the bot ships three built-in workarounds for the handshake bugs that
+  used to kill it (see "How the connection works" below). On any disconnect the
+  console dumps the last 40 packets in both directions for diagnosis.
 - `warpCommand` — how to reach SkyBlock after login (default `skyblock`).
 - `dryRun` — **`true` = observe (safe), `false` = live trading.**
 - `strategy` — the brain knobs (order slots, margins, sizing, volume floors …),
@@ -105,68 +101,49 @@ alerts — sign-in prompts, connect/disconnect, kicks, and a periodic status lin
 (purse · orders · top flip) every `webhookStatusMin` minutes. Leave it `""` to
 disable. This is the "run it 24/7 on a VPS and watch from your phone" workflow.
 
-## ⚠️ Direct connection to Hypixel does NOT work — use a proxy
+## "Badly behaving modifications" kicks — what actually causes them
 
-Mineflayer cannot complete Hypixel's login→configuration handshake on 1.20.2+
-(confirmed: login succeeds, we send `login_acknowledged` + brand + settings, then
-Hypixel closes the socket itself before sending any configuration data). This is
-[mineflayer#3775](https://github.com/PrismarineJS/mineflayer/issues/3775), closed
-upstream as *not planned*. **You must route through a proxy** (ViaProxy) that
-handles Hypixel's handshake and hands a clean stream to the bot.
+If Hypixel kicks you to the lobby with *"We have detected badly behaving
+modifications…"*, it is **not** your movement/physics and **not** a ban — it's the
+anti-cheat flagging **automated menu clicking**. Current Hypixel builds flag rapid
+or non-human GUI interaction (fast clicks, middle-click, quick inventory moves);
+mineflayer navigating the Bazaar menu tick-fast looks exactly like that. This repo
+mitigates it:
 
-### ViaProxy setup (the working path)
+- **OBSERVE mode clicks nothing.** Purse, cookie and prices come from the
+  scoreboard, tab list and public API — no GUI is opened. Reading your own open
+  orders (which *does* need the menu) is opt-in via `"readOrdersGui": true`, and
+  even then the bot human-paces the clicks and closes the menu afterward.
+- **Every menu click is human-paced** — a randomized ~0.55–1.2s beat
+  (`clickDelayMs` / `clickJitterMs`), only left-click, never middle/shift-click.
+- **Menus are closed when done**, instead of sitting open and re-clicked each cycle.
 
-1. Download **ViaProxy** (jar) from
-   <https://github.com/ViaVersion/ViaProxy/releases> onto the same machine as the
-   bot. Needs Java 17+.
-2. Run it and configure:
-   - **Target**: `mc.hypixel.net`  ·  **Target version**: `1.21.11` (or "Auto")
-   - **Bind / local port**: e.g. `127.0.0.1:25568`
-   - **Account**: add your alt's Microsoft account in ViaProxy (it does the real
-     auth to Hypixel), OR use passthrough and auth on the bot side.
-   - ViaProxy has a GUI; for a headless VPS use its `viaproxy.yml` and run
-     `java -jar ViaProxy-*.jar` (see its wiki for headless/CLI mode).
-3. Point the bot at ViaProxy in `config.json`:
-   ```json
-   "host": "127.0.0.1",
-   "port": 25568,
-   "auth": "offline",
-   "username": "bzbot"
-   ```
-   (offline because ViaProxy holds the account; keep `"version"` matching what
-   ViaProxy accepts on its listen side.)
+Movement/physics is left at mineflayer defaults — standing still is fine; it was
+never the trigger.
 
-If you ALREADY run a working proxy (you said you do), just set `host`/`port` to it
-and `auth` per the two modes below — no new setup needed.
+## How the connection works (no proxy needed)
 
-## Connecting through a proxy (ViaProxy etc.)
+Direct connection to Hypixel on 1.21.11 works. Three stock-mineflayer bugs used
+to kill it — each looked like a bare `socketClosed` — and `index.js` carries a
+built-in workaround for each (verified working July 2026):
 
-If you already run a proxy on the VPS that connects to Hypixel (ViaProxy is the
-usual one), **point the bot at the proxy instead of `mc.hypixel.net`** — the proxy
-handles Hypixel's login/configuration handshake (and often holds the account),
-which is why a raw direct connection gets dropped after `[login] success`.
+1. **Client settings during configuration** — Hypixel drops clients that never
+   send the `settings` packet in the 1.20.2+ configuration phase
+   ([mineflayer#3623](https://github.com/PrismarineJS/mineflayer/issues/3623),
+   upstream fix unmerged). We send it on every configuration entry.
+2. **SkyBlock's required resource pack** (SkyBlock 0.26, July 2026) — pushed
+   during the transfer into SkyBlock. Mineflayer's `acceptResourcePack()` is
+   broken (serializes the pack UUID as 16 zero bytes), so we answer the raw
+   packet ourselves with the accepted/downloaded/loaded sequence.
+3. **Play packets during the transfer** — mineflayer's physics keeps sending
+   `position` while the connection is back in the configuration phase; the
+   serializer silently emits it as a malformed 0x00 (settings) packet and
+   Hypixel closes the socket. A write-guard drops non-configuration packets
+   while the transfer is in progress.
 
-Two proxy setups:
-
-**A) Proxy holds the Microsoft account** (most common ViaProxy setup):
-```json
-"host": "127.0.0.1",
-"port": <your proxy's listen port>,
-"auth": "offline",
-"username": "bzbot"          // any nickname — the proxy does the real auth
-```
-
-**B) Proxy is passthrough only** (you auth on the bot side):
-```json
-"host": "127.0.0.1",
-"port": <your proxy's listen port>,
-"auth": "microsoft",
-"username": "your-alt@email.com"
-```
-
-Keep `"version"` matching whatever your proxy accepts on its listen side (usually
-the same client version you'd normally join with). If the proxy is on another
-machine, use its IP instead of `127.0.0.1`.
+ViaProxy/1.20.1 downgrading (the old workaround) is no longer needed. On any
+disconnect the console prints the last 40 packets in both directions — if a new
+handshake problem ever appears, that tape is how you find it.
 
 ## Troubleshooting login
 

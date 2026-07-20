@@ -7,12 +7,12 @@
 
   "warpCommand": "skyblock",
   "islandCommand": "is",
-  "freezePhysics": true,
   "humanize": false,
   "startDelaySec": 8,
 
   "dryRun": true,
-  "observeIntervalSec": 15,
+  "observeIntervalSec": 30,
+  "readOrdersGui": false,
 
   "viewer": false,
   "viewerPort": 3007,
@@ -32,8 +32,8 @@
     "maxOrderVolumeFraction": 1.0,
     "orderBudgetFraction": 0.5,
     "coinReserve": 0,
-    "actionDelayTicks": 3,
-    "actionJitterTicks": 2,
+    "clickDelayMs": 550,
+    "clickJitterMs": 650,
     "cookieRefreshEnabled": false
   }
 }

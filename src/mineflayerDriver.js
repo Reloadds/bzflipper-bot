@@ -10,6 +10,8 @@ import {
   onceWindow, waitTicks,
 } from './gui.js';
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // ---- Hypixel on-screen text (the tuning surface — verify each in-game) ----
 export const S = {
   MANAGE_ORDERS: 'manage orders',
@@ -41,7 +43,13 @@ export class MineflayerDriver {
     this.bot = bot;
     this.cfg = cfg;
     this.log = log;
-    this.pace = () => waitTicks(bot, (cfg.actionDelayTicks ?? 3) + Math.floor(Math.random() * ((cfg.actionJitterTicks ?? 2) + 1)));
+    // HUMAN menu cadence. Hypixel's anti-cheat flags automated menu clicks that
+    // land faster than a person could read+click ("badly behaving modifications"
+    // kick). Tick-pacing (~150-250ms) is far too fast, so we wait a randomized
+    // human beat between every click. Tunable via clickDelayMs/clickJitterMs.
+    const base = cfg.clickDelayMs ?? 550;
+    const jit = cfg.clickJitterMs ?? 650;
+    this.pace = () => sleep(base + Math.floor(Math.random() * jit)); // ~0.55–1.2s
   }
 
   _win() { return this.bot.currentWindow; }
@@ -50,9 +58,19 @@ export class MineflayerDriver {
     const win = this._win();
     const slot = findSlot(win, needle);
     if (slot < 0) return false;
+    // Always left-click, normal mode (0,0). Middle-click / shift-click patterns
+    // are exactly what Hypixel flags — never use them for menu navigation.
     await this.bot.clickWindow(slot, 0, 0);
     await this.pace();
     return true;
+  }
+
+  /** Close whatever menu is open, the way a real player backs out. Leaving a
+   *  server GUI open indefinitely (and re-clicking into it every cycle) is part
+   *  of the automated-usage signature; close it as soon as we're done reading. */
+  async closeBook() {
+    try { const w = this._win(); if (w) await this.bot.closeWindow(w); } catch { /* already closed */ }
+    await this.pace();
   }
 
   // ---------- READ (used by OBSERVE mode; safe) ----------

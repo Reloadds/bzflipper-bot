@@ -13,6 +13,7 @@
   "dryRun": true,
   "observeIntervalSec": 30,
   "readOrdersGui": false,
+  "guiProbe": false,
 
   "viewer": false,
   "viewerPort": 3007,

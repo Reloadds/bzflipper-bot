@@ -12,7 +12,7 @@ import { makeConfig } from './src/config.js';
 import { rank } from './src/ranking.js';
 import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
-import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, scoreboardTitle } from './src/gui.js';
+import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, scoreboardTitle, componentText, onceWindow, findSlot } from './src/gui.js';
 import { startHumanize } from './src/humanize.js';
 
 // ---- config ----
@@ -45,6 +45,15 @@ const bot = {
   viewer: raw.viewer === true,
   viewerPort: raw.viewerPort ?? 3007,
   debugDump: raw.debugDump === true,
+  // OBSERVE mode: open + read your live open-orders grid (needs GUI clicks). Off
+  // by default; the desync (not clicking) was the ban risk, but keep reads minimal.
+  readOrdersGui: raw.readOrdersGui === true,
+  // Never volunteer our own position — defer to the server (fixes the 1.21.11
+  // chunk-desync Watchdog kick). Default ON; set false only to debug movement.
+  serverAuthoritativePosition: raw.serverAuthoritativePosition !== false,
+  // One-shot: on reaching the island, open the Bazaar and dump the real GUI
+  // structure (titles/slots/lore) so the S-table string anchors can be verified.
+  guiProbe: raw.guiProbe === true,
 };
 
 const fmt = (v) => {
@@ -292,9 +301,10 @@ function start() {
 
   mc.once('spawn', async () => {
     everSpawned = true;         // we made it into the world — real drops now reconnect
-    mc.physicsEnabled = true;   // normal client physics. Standing still is NOT what
-                                // triggers the "badly behaving modifications" kick —
-                                // automated Bazaar-MENU CLICKING is (see driver).
+    mc.physicsEnabled = true;   // physics stays on, but serverAuthoritativePosition
+                                // drops our outgoing position packets — the 1.21.11
+                                // chunk-desync (loadedColumns=0) made our self-reported
+                                // onGround invalid and got us Watchdog-kicked.
     console.log('✅ spawned in-world. Heading to SkyBlock…');
     if (bot.viewer) await startViewer(mc);
 
@@ -312,8 +322,17 @@ function start() {
       console.log(`  [WORLD] pos=${e.position.x.toFixed(2)},${e.position.y.toFixed(2)},${e.position.z.toFixed(2)} onGround=${e.onGround} blockAt=${at ? at.name : 'NULL (chunk not loaded)'} below=${below ? below.name : 'NULL'} loadedColumns=${cols}`);
     }, 6000);
 
-    // Optional idle head-look presence (rotation packets only — never flagged).
-    if (bot.humanize) {
+    // One-shot GUI probe: dump the real Bazaar menu structure so the S-table
+    // string anchors (mineflayerDriver.js) can be verified before live trading.
+    if (bot.guiProbe) {
+      try { await probeBazaarGui(mc, api, cfg); }
+      catch (e) { console.log('  [PROBE] error:', e.message); }
+    }
+
+    // Idle head-look presence only makes sense when we actually send rotation
+    // packets. With serverAuthoritativePosition on, `look` is suppressed, so
+    // humanize would be a no-op — skip it.
+    if (bot.humanize && !bot.serverAuthoritativePosition) {
       startHumanize(mc, { log: bot.debugDump ? console.log : () => {} });
       console.log('humanize: on (idle head-look only, no body movement)');
     }
@@ -365,6 +384,68 @@ async function joinSkyblockIsland(mc) {
     await wait(6000);
   }
   console.log('⚠ could not reach the island — the [nav] lines above show where it got stuck.');
+}
+
+// ---- GUI PROBE: dump the real Bazaar menu structure (verify S-table anchors) ----
+// One-shot diagnostic. Opens the main Bazaar, a product page for the current top
+// flip, and the Manage Orders grid, printing each window's title + every slot
+// (name + lore). This is the ground truth for tuning the Hypixel strings in
+// mineflayerDriver.js before the write path can work. Read-only: it only opens
+// menus and closes them, places nothing.
+async function probeBazaarGui(mc, api, cfg) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const dumpWin = (label) => {
+    const w = mc.currentWindow;
+    if (!w) { console.log(`  [PROBE] ${label}: (no window open)`); return null; }
+    const title = componentText(w.title) || '(untitled)';
+    const rows = readWindow(w);
+    console.log(`\n  [PROBE] ===== ${label} =====`);
+    console.log(`  [PROBE] title="${title}"  totalSlots=${w.slots.length}  chestSlots=${w.inventoryStart ?? '?'}`);
+    for (const r of rows) {
+      console.log(`    [${String(r.slot).padStart(2)}] "${r.name}"`);
+      for (const l of r.lore.slice(0, 6)) if (l) console.log(`         · ${l}`);
+    }
+    return w;
+  };
+  const closeWin = async () => {
+    try { if (mc.currentWindow) await mc.closeWindow(mc.currentWindow); } catch { /* ignore */ }
+    await sleep(700);
+  };
+  const openCmd = async (cmd, label) => {
+    await closeWin();
+    mc.chat('/' + cmd);
+    await onceWindow(mc, 4500);
+    await sleep(800); // let Hypixel populate the slots
+    return dumpWin(label);
+  };
+
+  console.log('\n========== BAZAAR GUI PROBE ==========');
+
+  // 1) Main Bazaar browser.
+  await openCmd('bz', '/bz  (main Bazaar)');
+
+  // 2) Product page for the current top-ranked flip — the buy/sell/price surface.
+  await api.refresh().catch(() => {});
+  const top = rank(api.candidates, cfg)[0];
+  const itemName = top?.candidate?.displayName;
+  if (itemName) await openCmd('bz ' + itemName, `/bz ${itemName}  (product page)`);
+  else console.log('  [PROBE] (no ranked item for product-page probe)');
+
+  // 3) Manage Orders grid (find the button in a fresh main Bazaar, click it).
+  const main = await openCmd('bz', '/bz  (for Manage Orders)');
+  const slot = main ? findSlot(main, 'manage orders') : -1;
+  if (slot >= 0) {
+    console.log(`  [PROBE] "manage orders" at slot ${slot} — clicking`);
+    await mc.clickWindow(slot, 0, 0);
+    await onceWindow(mc, 4500);
+    await sleep(800);
+    dumpWin('Manage Orders grid');
+  } else if (main) {
+    console.log('  [PROBE] "manage orders" NOT found — real button label must be one of the names above.');
+  }
+
+  await closeWin();
+  console.log('========== END PROBE ==========\n');
 }
 
 // ---- OBSERVE: read + rank + print, place nothing ----

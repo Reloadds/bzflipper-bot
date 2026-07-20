@@ -465,6 +465,10 @@ function start() {
 
     running = true;
     dash.status = bot.dryRun ? 'observing' : 'trading';
+    // LIVE mode = real trading → arm the confirm click. (The confirm gate exists
+    // so the --place-test/--cycle-test flows can walk end-to-end WITHOUT placing;
+    // genuine LIVE, i.e. dryRun:false, must actually click confirm.)
+    if (!bot.dryRun) { driver.armConfirm(true); console.log('\x1b[31mconfirm: ARMED — orders will be placed for real.\x1b[0m'); }
     notify(`✅ ${bot.username} on SkyBlock island — ${bot.dryRun ? 'OBSERVE' : 'LIVE'} mode`);
     bot.dryRun ? observeLoop(mc, api, driver, cfg, () => running) : liveLoop(sm, api, cfg, () => running);
   });

@@ -227,16 +227,32 @@ function start() {
 
   mc.once('spawn', async () => {
     everSpawned = true;         // we made it into the world — real drops now reconnect
-    mc.physicsEnabled = true;   // apply velocity/knockback like a real client (anti-cheat)
+    mc.physicsEnabled = true;   // ON at spawn so gravity settles us onto solid ground
     console.log('✅ spawned in-world. Heading to SkyBlock…');
     if (bot.viewer) await startViewer(mc);
 
     await joinSkyblockIsland(mc);
 
-    // Natural idle presence so we don't read as a frozen entity.
-    if (bot.humanize) {
+    // ── Freeze physics (fix for Hypixel "badly behaving modifications") ────────
+    // On 1.21.11 prismarine-physics' client-side prediction diverges from
+    // Hypixel's server physics, so the `position` packets mineflayer streams
+    // every tick — even standing perfectly still — read as invalid movement and
+    // Watchdog kicks with "badly behaving modifications". Now that we're grounded
+    // on the island, turn physics OFF: mineflayer stops predicting and streaming
+    // position, and the bot simply holds whatever position the server teleports
+    // it to (server-authoritative). Nothing client-originated = nothing to flag.
+    // Chat-based navigation (/play, /is) and GUI clicks don't need physics.
+    if (bot.freezePhysics !== false) {
+      try { await mc.waitForTicks(20); } catch {}   // ~1s to settle onto the floor
+      mc.physicsEnabled = false;
+      try { mc.clearControlStates(); } catch {}
+      console.log('physics: FROZEN — server-authoritative position (avoids 1.21.11 movement flags)');
+    } else if (bot.humanize) {
+      // Idle head-look presence only runs when physics is live (bot.look needs
+      // the physics tick to emit rotation packets). With physics frozen the bot
+      // is intentionally a still, server-parked entity.
       startHumanize(mc, { log: bot.debugDump ? console.log : () => {} });
-      console.log('humanize: on (natural idle look/crouch, no walking)');
+      console.log('humanize: on (idle head-look only, no body movement)');
     }
 
     running = true;

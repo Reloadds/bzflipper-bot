@@ -124,7 +124,7 @@ const logRing = [];
   };
 }
 const ctx = { mc: null, driver: null, api: null, sm: null };
-const dash = { status: 'starting', orders: [], session: { profit: 0, flips: 0 } };
+const dash = { status: 'starting', orders: [], session: { profit: 0, flips: 0 }, tradingStartedAt: null };
 
 function dashState() {
   let purse = null, cookieH = null, flips = [];
@@ -146,8 +146,17 @@ function dashState() {
     autoMargin: !!cfg.autoMargin,
     effectiveMargin: ctx.api ? ctx.api.effectiveMinMargin() : cfg.apiMinMargin,
     marginBonus: ctx.api?.dynMarginBonus ?? 0,
+    coinsPerHour: coinsPerHour(),
     logs: logRing.slice(-150),
   };
+}
+
+// Realized coins/hour since trading began (average). null until we have a sample.
+function coinsPerHour() {
+  const sess = ctx.sm?.session;
+  if (!sess || !dash.tradingStartedAt) return null;
+  const hours = (Date.now() - dash.tradingStartedAt) / 3_600_000;
+  return hours > 0.003 ? sess.profit / hours : null; // ~11s min before a rate is meaningful
 }
 
 // Strategy knobs the dashboard may edit live. cfg is passed by reference to the
@@ -808,6 +817,7 @@ async function observeLoop(mc, api, driver, cfg, alive) {
 // ---- LIVE: run the state machine (real orders) ----
 async function liveLoop(sm, api, cfg, alive) {
   console.log('\x1b[31mLIVE trading — the state machine will place real orders. Ctrl-C to stop.\x1b[0m');
+  dash.tradingStartedAt = Date.now(); // start the coins/hr clock
   // Keep the API fresh on its own cadence.
   const refresh = async () => { try { await api.refresh(); } catch (e) { console.log('api:', e.message); } };
   await refresh();

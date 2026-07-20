@@ -100,6 +100,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <div class="card"><div class="k">Purse</div><div class="v" id="purse">—</div></div>
     <div class="card"><div class="k">Cookie</div><div class="v" id="cookie">—</div></div>
     <div class="card"><div class="k">Open orders</div><div class="v" id="ordn">—</div></div>
+    <div class="card"><div class="k">Coins / hr</div><div class="v" id="cph">—</div><div class="k" id="cphsub"></div></div>
     <div class="card"><div class="k">Session profit</div><div class="v" id="profit">—</div><div class="k" id="flips"></div></div>
     <div class="card"><div class="k">Margin gate <span id="autobadge" class="tag" style="display:none">AUTO</span></div><div class="v" id="mgate">—</div><div class="k" id="mgatesub"></div></div>
   </div>
@@ -139,6 +140,10 @@ async function tick(){
   $('ordn').textContent=s.orders?s.orders.length:0;
   $('profit').textContent=(s.session&&s.session.profit!=null)?fmt(s.session.profit):'—';
   $('flips').textContent=s.session?((s.session.flips||0)+' flips'):'';
+  const cph=s.coinsPerHour;
+  $('cph').textContent=cph==null?'—':fmt(cph)+'/hr';
+  $('cph').style.color=cph==null?'':(cph>=12e6?'var(--acc)':cph>=6e6?'var(--warn)':'var(--bad)');
+  $('cphsub').textContent=cph==null?'warming up…':(cph>=12e6?'✓ ≥ 12M target':'target 12M/hr');
   $('mgate').textContent=s.effectiveMargin==null?'—':(s.effectiveMargin*100).toFixed(1)+'%';
   $('autobadge').style.display=s.autoMargin?'':'none';
   $('mgatesub').textContent=(s.marginBonus>0)?('+'+(s.marginBonus*100).toFixed(1)+'% adaptive'):(s.autoMargin?'at floor':'');

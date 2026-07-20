@@ -55,6 +55,22 @@ Every ~15s:
 That proves the whole chain works headless: login → SkyBlock → Bazaar read →
 ranking. **This is what to verify first.**
 
+## Dashboard (localhost web UI)
+
+A built-in dashboard (like MBF / the mod's HUD) runs at **http://localhost:3000**
+by default — no extra dependencies, just open it in a browser. It live-updates
+(polls every 2s) and shows:
+
+- connection status + mode (OBSERVE/LIVE), uptime, purse, cookie
+- the ranked **top flips** (coins/hr, margin, velocity) — tradeable-only
+- your **open orders** with fill bars + claim flags (populated in LIVE mode, or in
+  OBSERVE with `"readOrdersGui": true`)
+- **session profit / flips** (LIVE)
+- a rolling **log console**
+
+Set the port with `"dashboardPort"` (default `3000`; `0` or `false` disables it).
+On a remote box, tunnel it: `ssh -L 3000:localhost:3000 user@your-host`.
+
 ## Watching + debugging
 
 Two switches in `config.json` make bring-up and remote debugging easy:

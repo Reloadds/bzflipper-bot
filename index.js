@@ -14,6 +14,7 @@ import { StateMachine } from './src/stateMachine.js';
 import { MineflayerDriver } from './src/mineflayerDriver.js';
 import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, scoreboardTitle, componentText, onceWindow, findSlot } from './src/gui.js';
 import { startHumanize } from './src/humanize.js';
+import { startDashboard } from './src/dashboard.js';
 
 // ---- config ----
 // First non-flag arg is the config path; flags like --probe are handled separately
@@ -47,6 +48,8 @@ const bot = {
   startDelaySec: raw.startDelaySec ?? 8,
   viewer: raw.viewer === true,
   viewerPort: raw.viewerPort ?? 3007,
+  // Localhost web dashboard (like MBF / the mod HUD). >0 enables it; 0/false off.
+  dashboardPort: (raw.dashboardPort === false || raw.dashboardPort === 0) ? 0 : (raw.dashboardPort ?? 3000),
   debugDump: raw.debugDump === true,
   // OBSERVE mode: open + read your live open-orders grid (needs GUI clicks). Off
   // by default; the desync (not clicking) was the ban risk, but keep reads minimal.
@@ -104,6 +107,44 @@ async function notify(content) {
     });
   } catch { /* alerts are best-effort */ }
 }
+
+// ---- localhost dashboard plumbing ----
+// A rolling log ring (tee console.log into it) + a shared ctx the dashboard reads.
+const startedAt = Date.now();
+const logRing = [];
+{
+  const _log = console.log.bind(console);
+  console.log = (...a) => {
+    try {
+      const line = a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ').replace(/\x1b\[[0-9;]*m/g, '');
+      logRing.push({ t: new Date().toISOString().slice(11, 19), line });
+      if (logRing.length > 400) logRing.shift();
+    } catch { /* never break logging */ }
+    _log(...a);
+  };
+}
+const ctx = { mc: null, driver: null, api: null, sm: null };
+const dash = { status: 'starting', orders: [], session: { profit: 0, flips: 0 } };
+
+function dashState() {
+  let purse = null, cookieH = null, flips = [];
+  try { const p = ctx.driver?.readPurse(); if (p != null && !Number.isNaN(p)) purse = p; } catch { /* not ready */ }
+  try { const c = ctx.driver?.readCookieRemainMs(); if (c != null) cookieH = c < 0 ? -1 : Math.round(c / 36e5); } catch { /* not ready */ }
+  try {
+    if (ctx.api?.candidates?.length) {
+      flips = rank(ctx.api.candidates, cfg, { locked: ctx.driver?.locked })
+        .filter((r) => r.state !== 'locked').slice(0, 15)
+        .map((r) => ({ name: r.candidate.displayName, cph: r.cph, margin: r.candidate.margin(cfg.taxFraction), velocity: r.velocity }));
+    }
+  } catch { /* ranking not ready */ }
+  return {
+    status: dash.status, mode: bot.dryRun ? 'OBSERVE' : 'LIVE', username: bot.username,
+    uptimeSec: (Date.now() - startedAt) / 1000, apiAgeSec: ctx.api ? ctx.api.ageSeconds() : null,
+    purse, cookieH, orders: dash.orders, session: ctx.sm?.session ?? dash.session, flips,
+    logs: logRing.slice(-150),
+  };
+}
+if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, log: console.log });
 
 console.log(`bzflipper-bot — ${bot.dryRun ? 'OBSERVE (dry run — no orders)' : '\x1b[31mLIVE TRADING\x1b[0m'} — ${bot.host} as ${bot.username}`);
 
@@ -292,8 +333,10 @@ function start() {
   const driver = new MineflayerDriver(mc, cfg, { log: (m) => console.log(m) });
   const sm = new StateMachine(cfg, api, driver);
   let running = false;
+  ctx.mc = mc; ctx.api = api; ctx.driver = driver; ctx.sm = sm; // expose to dashboard
+  dash.status = 'connecting';
 
-  mc.on('login', () => { attempts = 0; console.log('✅ logged in — loading SkyBlock…'); });
+  mc.on('login', () => { attempts = 0; dash.status = 'loading SkyBlock'; console.log('✅ logged in — loading SkyBlock…'); });
   // Hypixel explains every lobby-kick / forced transfer in chat ("A kick
   // occurred…", "You are sending commands too fast!", Watchdog warnings).
   // Log all chat so those reasons are visible instead of a silent transfer.
@@ -321,6 +364,7 @@ function start() {
   mc.on('error', (err) => console.log('error:', err.message));
   mc.on('end', (why) => {
     running = false;
+    dash.status = 'disconnected'; dash.orders = [];
 
     // Reconnect with a sane floor (attempts resets to 0 on login, so don't let
     // the backoff collapse to 0s and hammer Hypixel).
@@ -392,6 +436,7 @@ function start() {
     }
 
     running = true;
+    dash.status = bot.dryRun ? 'observing' : 'trading';
     notify(`✅ ${bot.username} on SkyBlock island — ${bot.dryRun ? 'OBSERVE' : 'LIVE'} mode`);
     bot.dryRun ? observeLoop(mc, api, driver, cfg, () => running) : liveLoop(sm, api, cfg, () => running);
   });
@@ -689,6 +734,7 @@ async function observeLoop(mc, api, driver, cfg, alive) {
         grid = driver.readOrders();
         await driver.closeBook();
       }
+      dash.orders = grid; // feed the dashboard
       // Exclude untradeable items (config avoidItems + learned skill-locks) so the
       // displayed flips are all actionable, not padded with things we can't trade.
       const rows = rank(api.candidates, cfg, { locked: driver.locked })
@@ -737,6 +783,7 @@ async function liveLoop(sm, api, cfg, alive) {
   while (alive()) {
     try {
       const action = await sm.tick();
+      if (sm.lastGrid) dash.orders = sm.lastGrid; // feed the dashboard
       if (action && action !== 'idle') console.log(`[live] ${action}  · session ${fmt(sm.session.profit)} (${sm.session.flips} flips)`);
     } catch (e) {
       console.log('tick error:', e.message);

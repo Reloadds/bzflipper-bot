@@ -113,6 +113,7 @@ export class StateMachine {
 
     await this.driver.openBook();
     const grid = this.driver.readOrders();
+    this.lastGrid = grid; // exposed for the dashboard
     this.observeFills(grid, t);
     this.adopt(grid, t);
 

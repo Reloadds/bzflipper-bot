@@ -17,6 +17,7 @@
 
   "viewer": false,
   "viewerPort": 3007,
+  "dashboardPort": 3000,
   "debugDump": false,
 
   "webhookUrl": "",

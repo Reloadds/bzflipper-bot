@@ -43,6 +43,8 @@ export class StateMachine {
     this.buyFillRate = new Map();
     this.efficiency = new Map();
     this.blacklistUntil = new Map();
+    this.relistCounts = new Map(); // key -> times relisted (relist-war guard)
+    this.lastRelistAt = new Map(); // key -> ms of last relist (cooldown)
     this.fillObs = new Map(); // "B|key"/"S|key" -> [t, filledUnits]
     this.learnedCapture = 0;
     this.learnedCaptureN = 0;
@@ -177,29 +179,60 @@ export class StateMachine {
       }
     }
 
-    // 3) Relist orders beaten on price (exact math vs the live top-of-book).
+    // 3) Relist orders beaten on price — WITH relist-war protection (ported from
+    //    the mod). Without it, a liquid market undercuts us by a tick every pass and
+    //    we chase the price forever, so nothing ever rests long enough to fill.
+    //    Guards: (a) a per-item COOLDOWN so a fresh (re)list gets time to fill;
+    //    (b) don't war with our OWN twin order or when the book's best IS us;
+    //    (c) don't chase a buy UP into a loss; (d) a hard relist CAP after which we
+    //    bench the item instead of chasing.
+    const cooldownMs = (this.cfg.relistCooldownSeconds ?? 45) * 1000;
+    const maxRelists = this.cfg.maxRelistsPerOrder ?? 6;
     for (const o of grid) {
       if (o.claimable || o.filledPct >= 100) continue;
       const q = this.api.quote(o.item);
       if (!q) continue;
+      const k = key(o.item);
       const bookBest = o.side === 'buy' ? q.topBuyOrder : q.lowestSellOffer;
       const beaten = o.side === 'buy' ? bookBest > o.price + EPS : bookBest < o.price - EPS;
       const bookIsUs = Math.abs(bookBest - o.price) <= EPS; // the best IS our own order
-      if (!beaten || bookIsUs) continue;
+      const myTwin = grid.some((g) => g !== o && g.side === o.side && key(g.item) === k &&
+        (o.side === 'buy' ? g.price >= o.price - EPS : g.price <= o.price + EPS));
+      if (!beaten || bookIsUs || myTwin) continue;
+      // Cooldown: leave a just-(re)listed order alone so it can actually FILL.
+      if (t - (this.lastRelistAt.get(k) ?? 0) < cooldownMs) continue;
       // Sell side: never chase below our cost.
       if (o.side === 'sell' && this.cfg.neverSellAtLoss !== false) {
         const floor = this.profitFloor(o.item);
         if (floor != null && q.lowestSellOffer - TICK < floor) continue;
       }
+      // Buy side: don't outbid UP into an unprofitable buy vs the sell side.
+      if (o.side === 'buy' && this.cfg.neverSellAtLoss !== false) {
+        const sellNet = q.lowestSellOffer * (1 - this.cfg.taxFraction);
+        if (sellNet <= (q.topBuyOrder + TICK) * (1 + this.cfg.apiMinMargin)) continue;
+      }
+      const relists = (this.relistCounts.get(k) ?? 0) + 1;
+      if (relists > maxRelists) {
+        // Lost the war — stop churning. Bench the item so we don't re-pick it; a
+        // buy cancel is a lossless refund (frees the slot), a sell we leave resting
+        // to avoid a forced loss.
+        this.blacklistUntil.set(k, t + (this.cfg.badItemBlacklistMinutes ?? 45) * 60_000);
+        if (o.side === 'buy' && await this.driver.cancel(o)) {
+          this.orders.delete(k); this.relistCounts.delete(k);
+          return this._done(`give-up-buy ${o.item}`);
+        }
+        continue;
+      }
       if (await this.driver.cancel(o)) {
-        const k = key(o.item);
+        this.relistCounts.set(k, relists);
+        this.lastRelistAt.set(k, t);
         if (o.side === 'buy') {
           this.orders.delete(k); // next tick re-buys the best pick
         } else {
           if (!this.pendingSells.includes(o.item)) this.pendingSells.push(o.item);
           inc(this.pendingAmounts, k, remainingUnits(o));
         }
-        return this._done(`relist-${o.side} ${o.item}`);
+        return this._done(`relist-${o.side} ${o.item} #${relists}`);
       }
     }
 
@@ -343,6 +376,7 @@ export class StateMachine {
       if (!prev) { this.fillObs.set(obsKey, [t, filled]); continue; }
       const dF = filled - prev[1];
       if (dF < 0) { this.fillObs.set(obsKey, [t, filled]); continue; } // relisted → new baseline
+      if (dF > 0) this.relistCounts.delete(key(o.item)); // it IS filling — not a losing war
       if (t - prev[0] < FILL_WINDOW_MS) continue;
       this.fillObs.set(obsKey, [t, filled]);
       const rate = dF / ((t - prev[0]) / 3_600_000);

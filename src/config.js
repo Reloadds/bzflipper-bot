@@ -19,6 +19,11 @@ export const defaultConfig = {
   captureFraction: 0.30, // assumed share of volume before we've measured it
   minEfficiency: 0.35, // bench items that capture too little of quoted margin
 
+  // Relist-war protection (stops thrash: cancel/relist chasing a tick every pass).
+  relistCooldownSeconds: 45, // leave a (re)listed order alone this long so it can fill
+  maxRelistsPerOrder: 6, // after this many relists of an item, bench it instead of chasing
+  neverSellAtLoss: true, // don't chase a sell below cost / a buy up into a loss
+
   // Adaptive margin controller (self-optimizes coins/hr). Tunes a dynamic bonus
   // ADDED ON TOP of apiMinMargin (never below your floor), reading slot/capital
   // binding: slots scarce + flips plentiful → raise the gate (each scarce slot

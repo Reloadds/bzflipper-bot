@@ -60,7 +60,14 @@ export class BazaarApi {
     this.lastUpdatedMs = 0;
     this.lastError = null;
     this._history = new Map(); // tag → number[] of recent mids
+    // Dynamic margin bonus set by the adaptive controller — ADDED on top of
+    // config.apiMinMargin (never below your floor). Lives here (not config) so it
+    // never persists; resets to 0 each run.
+    this.dynMarginBonus = 0;
   }
+
+  setMarginBonus(b) { this.dynMarginBonus = Math.max(0, b || 0); }
+  effectiveMinMargin() { return this.config.apiMinMargin + this.dynMarginBonus; }
 
   ageSeconds() {
     return this.lastUpdatedMs === 0 ? -1 : Math.floor((Date.now() - this.lastUpdatedMs) / 1000);
@@ -106,7 +113,8 @@ export class BazaarApi {
         quoteMap.set(norm(c.displayName), c);
 
         const margin = PriceMath.netMarginFraction(topBuyOrder, lowestSellOffer, cfg.taxFraction);
-        if (margin < c.requiredMargin(cfg) || margin > cfg.apiMaxMargin) continue;
+        // Gate = required margin + the adaptive controller's dynamic bonus.
+        if (margin < c.requiredMargin(cfg) + this.dynMarginBonus || margin > cfg.apiMaxMargin) continue;
         if (Math.min(buyMW, sellMW) < cfg.apiMinWeeklyVolume) continue;
         if (trend < -cfg.crashFilter) continue;
         if (cfg.apiMaxUnitPrice > 0 && topBuyOrder > cfg.apiMaxUnitPrice) continue;

@@ -67,11 +67,30 @@ by default — no extra dependencies, just open it in a browser. It live-updates
   OBSERVE with `"readOrdersGui": true`)
 - **session profit / flips** (LIVE)
 - a rolling **log console**
+- a **Margin gate** card showing the live effective margin (with an `AUTO` badge
+  and the adaptive bonus, e.g. `+1.5% adaptive`)
 - a **Tuning panel** to edit the strategy gates **live** — min/max margin, min weekly
   volume, min efficiency, order slots, budget fraction, coin reserve, min order
-  value. Changes apply on the next tick (cfg is read live) and persist to
-  `config.json`. The engine already maximizes realized coins/hr (fill-aware series
-  velocity + learned efficiency); these gates let you steer the risk/liquidity band.
+  value, auto-margin max bonus. Changes apply on the next tick (cfg is read live)
+  and persist to `config.json`.
+
+## Self-optimization (it tunes itself)
+
+Two layers, on by default:
+
+1. **The engine already maximizes realized coins/hr** — ranks by
+   `profit/unit × seriesVelocity(both legs) × learned efficiency × trend`, buys at
+   `topBuy+0.1` / sells at `lowestSell−0.1` (captures the spread, doesn't overpay to
+   fill fast), measures real fill rates, and benches underperformers.
+2. **Adaptive margin controller** (`autoMargin`, ported from the mod's v0.67) — on a
+   slow loop it moves a dynamic margin bonus **on top of** your `apiMinMargin` floor
+   to chase max coins/hr, using slot/capital binding as the signal: **slots scarce +
+   flips plentiful → raise** the gate (each scarce slot lands a fatter flip); **idle
+   slots + starving → lower** toward the floor so the bankroll deploys. It never
+   trades below your configured floor and adds at most `autoMarginMaxBonus` (default
+   +5%), one gentle 0.5% step per `autoMarginPeriodSeconds`. Set
+   `"autoMarginMaxBonus": 0` (or `"autoMargin": false`) to turn it off. Watch it live
+   on the Margin-gate card and in the log (`⚙️ auto-margin 3.0%→3.5% …`).
 
 Set the port with `"dashboardPort"` (default `3000`; `0` or `false` disables it).
 On a remote box, tunnel it: `ssh -L 3000:localhost:3000 user@your-host`.

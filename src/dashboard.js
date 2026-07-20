@@ -101,6 +101,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <div class="card"><div class="k">Cookie</div><div class="v" id="cookie">—</div></div>
     <div class="card"><div class="k">Open orders</div><div class="v" id="ordn">—</div></div>
     <div class="card"><div class="k">Session profit</div><div class="v" id="profit">—</div><div class="k" id="flips"></div></div>
+    <div class="card"><div class="k">Margin gate <span id="autobadge" class="tag" style="display:none">AUTO</span></div><div class="v" id="mgate">—</div><div class="k" id="mgatesub"></div></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
     <h2>Tuning — edit live <span id="saved" class="muted" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
@@ -115,7 +116,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const KNOBS=[['apiMinMargin','Min margin (frac)',0.005],['apiMaxMargin','Max margin (frac)',0.01],['apiMinWeeklyVolume','Min weekly volume',10000],['minEfficiency','Min efficiency',0.05],['orderLimit','Order slots',1],['orderBudgetFraction','Budget fraction',0.05],['coinReserve','Coin reserve',1000000],['minOrderValue','Min order value',50000]];
+const KNOBS=[['apiMinMargin','Min margin (frac)',0.005],['apiMaxMargin','Max margin (frac)',0.01],['apiMinWeeklyVolume','Min weekly volume',10000],['minEfficiency','Min efficiency',0.05],['orderLimit','Order slots',1],['orderBudgetFraction','Budget fraction',0.05],['coinReserve','Coin reserve',1000000],['minOrderValue','Min order value',50000],['autoMarginMaxBonus','Auto-margin max +',0.005]];
 let knobsBuilt=false;
 function syncKnobs(cfg){if(!cfg)return;
   if(!knobsBuilt){$('knobs').innerHTML=KNOBS.map(([k,l,s])=>'<div class="knob"><label>'+l+'</label><input data-k="'+k+'" type="number" step="'+s+'" value="'+(cfg[k]??'')+'"></div>').join('');knobsBuilt=true;return;}
@@ -138,6 +139,9 @@ async function tick(){
   $('ordn').textContent=s.orders?s.orders.length:0;
   $('profit').textContent=(s.session&&s.session.profit!=null)?fmt(s.session.profit):'—';
   $('flips').textContent=s.session?((s.session.flips||0)+' flips'):'';
+  $('mgate').textContent=s.effectiveMargin==null?'—':(s.effectiveMargin*100).toFixed(1)+'%';
+  $('autobadge').style.display=s.autoMargin?'':'none';
+  $('mgatesub').textContent=(s.marginBonus>0)?('+'+(s.marginBonus*100).toFixed(1)+'% adaptive'):(s.autoMargin?'at floor':'');
   // flips
   const fw=$('flipsWrap');
   if(!s.flips||!s.flips.length){fw.innerHTML='<div class="empty">no ranked flips yet…</div>';}

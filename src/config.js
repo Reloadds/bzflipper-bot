@@ -19,6 +19,14 @@ export const defaultConfig = {
   captureFraction: 0.30, // assumed share of volume before we've measured it
   minEfficiency: 0.35, // bench items that capture too little of quoted margin
 
+  // Adaptive margin controller (self-optimizes coins/hr). Tunes a dynamic bonus
+  // ADDED ON TOP of apiMinMargin (never below your floor), reading slot/capital
+  // binding: slots scarce + flips plentiful → raise the gate (each scarce slot
+  // lands a fatter flip); capital idle → lower it so the bankroll deploys.
+  autoMargin: true,
+  autoMarginMaxBonus: 0.05, // most it may add above apiMinMargin (0 = disabled)
+  autoMarginPeriodSeconds: 120, // how often it may step (0.5%/step, gentle)
+
   // Sizing (used by the driver; kept here so the brain can preview order sizes).
   orderVolumeFraction: 0.5,
   maxOrderVolumeFraction: 1.0, // when capital is idle

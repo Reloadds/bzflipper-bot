@@ -8,7 +8,7 @@
 
 import { TICK, roundToTick, sellOfferPrice, netMarginFraction } from './priceMath.js';
 import { norm } from './bazaarApi.js';
-import { pickNext, orderSize, scoreCandidate } from './ranking.js';
+import { pickNext, orderSize, scoreCandidate, rank } from './ranking.js';
 
 const EPS = TICK / 2; // ignore sub-half-tick float noise
 const FILL_WINDOW_MS = 60_000; // measure fill rate over a real window, not per-tick
@@ -87,6 +87,35 @@ export class StateMachine {
     };
   }
 
+  /** Adaptive margin controller (ported from the mod v0.67). Tunes a dynamic
+   *  bonus ON TOP of apiMinMargin toward max realized coins/hr, reading slot/
+   *  capital binding — NOT noisy coins/hr. Slots scarce + flips plentiful → raise
+   *  the gate (each scarce slot lands a fatter flip); idle slots + starving →
+   *  lower toward the floor so the bankroll deploys. Never below your floor. */
+  adaptMargin() {
+    if (!this.cfg.autoMargin) return;
+    const now = this.now();
+    if (now - (this._lastMarginAdjust ?? 0) < (this.cfg.autoMarginPeriodSeconds ?? 120) * 1000) return;
+    this._lastMarginAdjust = now;
+
+    const freeSlots = Math.max(0, (this.cfg.orderLimit ?? 14) - this.orders.size);
+    const qualifiers = rank(this.api.candidates, this.cfg, this.brainState()).filter((r) => r.state === 'ok').length;
+
+    const cur = this.api.dynMarginBonus;
+    const hi = Math.max(0, this.cfg.autoMarginMaxBonus ?? 0.05);
+    const step = 0.005; // 0.5%/period — gentle
+    let next = cur;
+    if (freeSlots <= 1 && qualifiers > 2 * Math.max(1, freeSlots) + 2) next = Math.min(hi, cur + step);
+    else if (freeSlots >= 2 && qualifiers < freeSlots) next = Math.max(0, cur - step);
+    else if (cur > 0) next = Math.max(0, cur - step / 2);
+
+    if (Math.abs(next - cur) > 1e-6) {
+      this.api.setMarginBonus(next);
+      const pct = (x) => ((this.cfg.apiMinMargin + x) * 100).toFixed(1);
+      console.log(`⚙️  auto-margin ${pct(cur)}%→${pct(next)}% (${qualifiers} flips ready, ${freeSlots} free slots)`);
+    }
+  }
+
   deployedBuyCapital(grid) {
     let sum = 0;
     for (const o of grid) {
@@ -116,6 +145,7 @@ export class StateMachine {
     this.lastGrid = grid; // exposed for the dashboard
     this.observeFills(grid, t);
     this.adopt(grid, t);
+    this.adaptMargin(); // self-tune the margin gate toward max coins/hr
 
     // 1) Claim anything claimable.
     const claimable = grid.find((o) => o.claimable);

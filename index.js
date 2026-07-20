@@ -143,6 +143,9 @@ function dashState() {
     status: dash.status, mode: bot.dryRun ? 'OBSERVE' : 'LIVE', username: bot.username,
     uptimeSec: (Date.now() - startedAt) / 1000, apiAgeSec: ctx.api ? ctx.api.ageSeconds() : null,
     purse, cookieH, orders: dash.orders, session: ctx.sm?.session ?? dash.session, flips, config,
+    autoMargin: !!cfg.autoMargin,
+    effectiveMargin: ctx.api ? ctx.api.effectiveMinMargin() : cfg.apiMinMargin,
+    marginBonus: ctx.api?.dynMarginBonus ?? 0,
     logs: logRing.slice(-150),
   };
 }
@@ -150,7 +153,7 @@ function dashState() {
 // Strategy knobs the dashboard may edit live. cfg is passed by reference to the
 // brain + state machine, so mutating it here takes effect on the next tick.
 const TUNABLE = ['apiMinMargin', 'apiMaxMargin', 'apiMinWeeklyVolume', 'minEfficiency',
-  'orderLimit', 'orderBudgetFraction', 'coinReserve', 'minOrderValue'];
+  'orderLimit', 'orderBudgetFraction', 'coinReserve', 'minOrderValue', 'autoMarginMaxBonus'];
 function applyConfig(patch) {
   const applied = {};
   for (const k of TUNABLE) {

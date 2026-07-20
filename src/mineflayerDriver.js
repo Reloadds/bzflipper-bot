@@ -1,41 +1,57 @@
 // The MineflayerDriver: implements the semantic driver seam (see driver.js in
-// bzflipper-headless) against a live `bot`. READ methods (purse, cookie timer,
-// order grid) are complete and are what OBSERVE mode exercises. WRITE methods
-// (placeBuy/placeSell/claim/cancel/refreshCookie) are the multi-step GUI
-// sequences — implemented, but every Hypixel string/slot marked `TUNE:` needs a
-// live confirmation pass, since they can't be verified without the real GUIs.
+// bzflipper-headless) against a live `bot`.
+//
+// The Hypixel strings/slots below are VERIFIED against the live 1.21.11 SkyBlock
+// v0.26 GUIs via the `--probe` diagnostic (see docs/BAZAAR_GUI.md). Two things are
+// still marked UNVERIFIED because they can only be reached by committing an order:
+//   1. the final Confirm screen (after picking a price), and
+//   2. the sign text input for custom amount / custom price.
+// Both are exercised (with logging) by a deliberate throwaway-alt micro-order.
 
 import {
   readWindow, findSlot, itemLore, scoreboardLines, tablistFooter,
-  onceWindow, waitTicks,
+  onceWindow, waitTicks, componentText,
 } from './gui.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---- Hypixel on-screen text (the tuning surface — verify each in-game) ----
+// ---- Hypixel on-screen text (VERIFIED unless marked) ----
 export const S = {
+  // main Bazaar
+  SEARCH: 'search',
   MANAGE_ORDERS: 'manage orders',
+  CLOSE: 'close',
+  // search-result product tile
+  VIEW_DETAILS: 'view details',   // tradeable tile lore: "click to view details!"
+  LOCKED: 'you must have',         // locked tile lore: "you must have <skill> <n>!"
+  // product details page
+  BUY_INSTANTLY: 'buy instantly',
+  SELL_INSTANTLY: 'sell instantly',
+  CREATE_BUY_ORDER: 'create buy order',
+  CREATE_SELL_OFFER: 'create sell offer',
   GO_BACK: 'go back',
-  BUY_ORDER: 'buy order',
-  SELL_OFFER: 'sell offer',
+  // amount screen — title "how many do you want?"
+  AMOUNT_TITLE: 'how many do you want',
   CUSTOM_AMOUNT: 'custom amount',
+  // price screen — title "how much do you want to pay?"
+  PRICE_TITLE: 'how much do you want to pay',
+  SAME_AS_TOP: 'same as top order',
+  TOP_ORDER_PLUS: 'top order +0.1',
   CUSTOM_PRICE: 'custom price',
-  BEST_BUY: '+0.1',
-  BEST_SELL: '-0.1',
+  // confirm screen — UNVERIFIED (label guessed; corrected during live micro-order)
   CONFIRM: 'confirm',
-  CLAIM: 'claim',
+  // Your Bazaar Orders grid — title "your bazaar orders"
+  ORDERS_TITLE: 'your bazaar orders',
+  CLAIM_ALL: 'claim all coins',
   CANCEL_ORDER: 'cancel order',
-  INSTASELL: 'sell instantly',
-  SIDE_BUY_PREFIX: 'buy ', // grid entries "BUY <item>" / "SELL <item>"
-  SIDE_SELL_PREFIX: 'sell ',
+  // lore anchors
+  TOP_ORDERS: 'top orders',
+  TOP_OFFERS: 'top offers',
   LORE_PRICE: 'price per unit',
-  LORE_AMOUNT_ORDER: 'order amount',
-  LORE_AMOUNT_OFFER: 'offer amount',
   LORE_FILLED: 'filled',
-  LORE_CLAIM: 'claim',
+  PURSE: 'purse',
   FOOTER_COOKIE: 'cookie buff',
   COOKIE_EXPIRED: 'not active',
-  PURSE: 'purse',
 };
 
 export class MineflayerDriver {
@@ -43,37 +59,44 @@ export class MineflayerDriver {
     this.bot = bot;
     this.cfg = cfg;
     this.log = log;
-    // HUMAN menu cadence. Hypixel's anti-cheat flags automated menu clicks that
-    // land faster than a person could read+click ("badly behaving modifications"
-    // kick). Tick-pacing (~150-250ms) is far too fast, so we wait a randomized
-    // human beat between every click. Tunable via clickDelayMs/clickJitterMs.
+    // Human menu cadence — Hypixel flags automated menu clicks that land faster
+    // than a person could read+click. Randomized ~0.55–1.2s between clicks.
     const base = cfg.clickDelayMs ?? 550;
     const jit = cfg.clickJitterMs ?? 650;
-    this.pace = () => sleep(base + Math.floor(Math.random() * jit)); // ~0.55–1.2s
+    this.pace = () => sleep(base + Math.floor(Math.random() * jit));
+
+    // Capture the sign-editor location the server hands us when we click a
+    // "custom …" option, so _setSign can address the right block (mineflayer's
+    // acceptResourcePack-style guess of the position is wrong).
+    this._signLoc = null;
+    const onSign = (p) => { this._signLoc = p.location; };
+    try { bot._client.on('open_sign_entity', onSign); } catch { /* name varies */ }
+    try { bot._client.on('open_sign_editor', onSign); } catch { /* older */ }
   }
 
   _win() { return this.bot.currentWindow; }
-  async _cmd(cmd) { this.bot.chat('/' + cmd); await onceWindow(this.bot, 3000); }
-  async _clickName(needle) {
-    const win = this._win();
-    const slot = findSlot(win, needle);
+  _title() { return componentText(this._win()?.title ?? ''); }
+
+  async _clickSlot(slot) {
     if (slot < 0) return false;
-    // Always left-click, normal mode (0,0). Middle-click / shift-click patterns
-    // are exactly what Hypixel flags — never use them for menu navigation.
-    await this.bot.clickWindow(slot, 0, 0);
+    await this.bot.clickWindow(slot, 0, 0); // left-click, normal mode ONLY
     await this.pace();
     return true;
   }
+  async _clickName(needle) { return this._clickSlot(findSlot(this._win(), needle)); }
 
-  /** Close whatever menu is open, the way a real player backs out. Leaving a
-   *  server GUI open indefinitely (and re-clicking into it every cycle) is part
-   *  of the automated-usage signature; close it as soon as we're done reading. */
+  async _cmd(cmd) {
+    this.bot.chat('/' + cmd);
+    await onceWindow(this.bot, 4000);
+    await this.pace();
+  }
+
   async closeBook() {
     try { const w = this._win(); if (w) await this.bot.closeWindow(w); } catch { /* already closed */ }
     await this.pace();
   }
 
-  // ---------- READ (used by OBSERVE mode; safe) ----------
+  // ---------- READ (OBSERVE mode; safe) ----------
 
   /** Coins in the SkyBlock sidebar ("Purse: 1,234"). NaN if unreadable. */
   readPurse() {
@@ -85,12 +108,8 @@ export class MineflayerDriver {
     return NaN;
   }
 
-  /** Cookie buff remaining from the tab-list footer: >0 ms, 0 expired, -1 unknown.
-   *  Hypixel lays the buff out over TWO lines, not one:
-   *    "cookie buff"
-   *    "1 day, 4 hours"   <-- the time is here, on the next line
-   *  so we scan from the "cookie buff" line forward to the next blank line and
-   *  parse the duration out of that whole block. */
+  /** Cookie buff remaining from the tab-list footer (time is on the line AFTER
+   *  "cookie buff"): >0 ms, 0 expired, -1 unknown. */
   readCookieRemainMs() {
     const footer = tablistFooter(this.bot);
     if (!footer.includes(S.FOOTER_COOKIE)) return -1;
@@ -109,26 +128,25 @@ export class MineflayerDriver {
   }
 
   freeInventorySlots() {
-    // Player inventory main slots (9..44) that are empty.
     let free = 0;
     for (let i = 9; i <= 44; i++) if (!this.bot.inventory.slots[i]) free++;
     return free;
   }
 
-  /** Open the Manage Orders grid fresh. */
+  /** Open the "Your Bazaar Orders" grid fresh (verified: /bz → Manage Orders @ name). */
   async openBook() {
-    if (!this._win()) await this._cmd('bz');
-    // If we're not already on Manage Orders, click into it.
-    const win = this._win();
-    if (win && findSlot(win, S.MANAGE_ORDERS) >= 0) {
-      await this._clickName(S.MANAGE_ORDERS);
-      await onceWindow(this.bot, 3000);
-    }
+    if (this._title().includes(S.ORDERS_TITLE)) return true;
+    if (!this._win() || !this._title().startsWith('bazaar')) await this._cmd('bz');
+    if (!(await this._clickName(S.MANAGE_ORDERS))) return false;
+    await onceWindow(this.bot, 4000);
+    await this.pace();
+    return this._title().includes(S.ORDERS_TITLE);
   }
 
-  /** Parse the Manage Orders grid into semantic Order rows. */
+  /** Parse the "Your Bazaar Orders" grid into semantic Order rows. */
   readOrders() {
     const win = this._win();
+    if (!componentText(win?.title ?? '').includes(S.ORDERS_TITLE)) return [];
     const rows = [];
     for (const { slot, name, lore } of readWindow(win)) {
       const parsed = parseOrder(slot, name, lore);
@@ -137,101 +155,158 @@ export class MineflayerDriver {
     return rows;
   }
 
-  // ---------- WRITE (LIVE mode only — TUNE against real GUIs) ----------
+  /** Navigate to a product's DETAILS page and read the live order book from the
+   *  "create buy order" / "create sell offer" lore. Returns {buyOrders, sellOffers}
+   *  (arrays of {price, qty, orders}) or null if unreachable/locked. */
+  async readOrderBook(item) {
+    if (!(await this._navigateTo(item))) return null;
+    const win = this._win();
+    const buy = itemLore(win.slots[findSlot(win, S.CREATE_BUY_ORDER)]);
+    const sell = itemLore(win.slots[findSlot(win, S.CREATE_SELL_OFFER)]);
+    return { buyOrders: parseBook(buy), sellOffers: parseBook(sell) };
+  }
+
+  // ---------- WRITE (LIVE mode) ----------
 
   async placeBuy(item, units, price) {
     if (!(await this._navigateTo(item))) return false;
-    if (!(await this._clickName(S.BUY_ORDER))) return false;
-    if (!(await this._setSign(S.CUSTOM_AMOUNT, String(units)))) return false;
-    if (!(await this._setSign(S.CUSTOM_PRICE, price.toFixed(1)))) return false;
-    return this._clickName(S.CONFIRM);
+    if (!(await this._clickName(S.CREATE_BUY_ORDER))) return false;      // → amount screen
+    await onceWindow(this.bot, 4000); await this.pace();
+    if (!(await this._enterAmount(units))) return false;                 // → price screen
+    if (!(await this._enterPrice(price))) return false;                  // → confirm screen
+    return this._confirm();
   }
 
   async placeSell(item, units, price) {
     if (!(await this._navigateTo(item))) return false;
-    if (!(await this._clickName(S.SELL_OFFER))) return false;
-    // Create Sell Offer sells all held units → straight to the price step.
-    if (!(await this._setSign(S.CUSTOM_PRICE, price.toFixed(1)))) return false;
-    return this._clickName(S.CONFIRM);
+    if (!(await this._clickName(S.CREATE_SELL_OFFER))) return false;
+    await onceWindow(this.bot, 4000); await this.pace();
+    // Sell flow mirrors buy (amount → price → confirm). UNVERIFIED past the
+    // details page — the live micro-order corrects the sell screens' titles.
+    if (!(await this._enterAmount(units))) return false;
+    if (!(await this._enterPrice(price))) return false;
+    return this._confirm();
+  }
+
+  async instasell(item) {
+    if (!(await this._navigateTo(item))) return false;
+    return this._clickName(S.SELL_INSTANTLY);
   }
 
   async claim(order) {
-    // Click the claimable grid slot; it claims goods (buy) or coins (sell).
-    if (!(await this.bot.clickWindow(order._slot, 0, 0).then(() => true).catch(() => false))) return null;
-    await this.pace();
-    // The grid re-reads next tick; report the currently-claimable units.
+    if (!(await this._clickSlot(order._slot))) return null;
     const units = Math.max(1, Math.round(order.amount * Math.min(100, order.filledPct) / 100));
     return { kind: order.side, units };
   }
 
   async cancel(order) {
-    await this.bot.clickWindow(order._slot, 0, 0); // opens Order Options
-    await onceWindow(this.bot, 3000);
+    if (!(await this._clickSlot(order._slot))) return false; // opens Order Options
+    await onceWindow(this.bot, 4000); await this.pace();
     const ok = await this._clickName(S.CANCEL_ORDER);
     return ok ? { refundUnits: Math.round(order.amount * (1 - Math.min(100, order.filledPct) / 100)) } : false;
   }
 
-  async instasell(item /* , units */) {
-    if (!(await this._navigateTo(item))) return false;
-    return this._clickName(S.INSTASELL);
-  }
-
-  /** TODO: cookie consume is a two-GUI flow (use item → confirm popup). Port the
-   *  hardened mod flow here once the live GUIs are confirmed. For now: no-op. */
   async refreshCookie() {
-    this.log('[cookie] refresh requested — not yet wired for headless; renew manually.');
+    this.log('[cookie] refresh not yet wired for headless; renew manually.');
     return false;
   }
 
-  // ---------- navigation + sign input (the fiddliest live bits) ----------
+  // ---------- navigation + amount/price/confirm/sign ----------
 
+  /** /bz <item> opens a SEARCH; the product tile lives inside it and must be
+   *  clicked to reach the details page. Returns true only when we're on details. */
   async _navigateTo(item) {
-    // Reach a product page via the Bazaar search. TUNE: exact search click/flow.
     await this._cmd('bz ' + item);
-    return !!this._win();
+    const search = this._win();
+    if (!search) return false;
+    const slot = findSlot(search, item.toLowerCase());
+    if (slot < 0) { this.log(`[nav] "${item}" not in search result`); return false; }
+    const lore = itemLore(search.slots[slot]).join(' ');
+    if (lore.includes(S.LOCKED)) { this.log(`[nav] "${item}" is skill-locked — cannot trade`); return false; }
+    if (!(await this._clickSlot(slot))) return false;
+    await onceWindow(this.bot, 4000); await this.pace();
+    // On the details page the product's own buy/sell buttons exist.
+    return findSlot(this._win(), S.CREATE_BUY_ORDER) >= 0 || findSlot(this._win(), S.CREATE_SELL_OFFER) >= 0;
   }
 
-  /** Click a "Custom …" option, then type into the server-opened sign GUI.
-   *  TUNE: Mineflayer sign input is a raw update_sign packet; field names vary by
-   *  protocol version. Verify with your minecraft-protocol version. */
-  async _setSign(optionName, text) {
-    if (!(await this._clickName(optionName))) return false;
-    // Wait for the sign editor to open, then submit the text.
-    await waitTicks(this.bot, 5);
+  /** Amount screen "how many do you want?": type an exact quantity via the sign. */
+  async _enterAmount(units) {
+    if (!this._title().includes(S.AMOUNT_TITLE)) { this.log('[amount] wrong screen: ' + this._title()); return false; }
+    if (!(await this._clickName(S.CUSTOM_AMOUNT))) return false;
+    if (!(await this._sign(String(Math.max(1, Math.round(units)))))) return false;
+    await onceWindow(this.bot, 4000); await this.pace();
+    return this._title().includes(S.PRICE_TITLE);
+  }
+
+  /** Price screen "how much do you want to pay?": type an exact price via the sign. */
+  async _enterPrice(price) {
+    if (!this._title().includes(S.PRICE_TITLE)) { this.log('[price] wrong screen: ' + this._title()); return false; }
+    if (!(await this._clickName(S.CUSTOM_PRICE))) return false;
+    if (!(await this._sign(price.toFixed(1)))) return false;
+    await onceWindow(this.bot, 4000); await this.pace();
+    return true; // now on the confirm screen
+  }
+
+  /** Confirm screen — UNVERIFIED label. Click the confirm/green tile. The live
+   *  micro-order prints this window so S.CONFIRM can be corrected if needed. */
+  async _confirm() {
+    const win = this._win();
+    this.log('[confirm] window "' + this._title() + '" slots: ' +
+      readWindow(win).map((r) => `${r.slot}:${r.name}`).join(', '));
+    return this._clickName(S.CONFIRM);
+  }
+
+  /** Type text into the sign editor Hypixel opens for custom amount/price. Uses
+   *  the location captured from open_sign_entity. Fields per 1.21.11 update_sign. */
+  async _sign(text) {
+    await waitTicks(this.bot, 6); // let the sign editor open + location arrive
+    const loc = this._signLoc ?? this.bot.entity?.position?.offset(0, 1, 0);
+    if (!loc) { this.log('[sign] no sign location captured'); return false; }
     try {
       this.bot._client.write('update_sign', {
-        location: this.bot.entity.position.offset(0, -1, 0), // placeholder; real sign pos comes from open_sign_entity
-        isFrontText: true,
+        location: loc, isFrontText: true,
         text1: text, text2: '', text3: '', text4: '',
       });
+      this.log(`[sign] wrote "${text}" @ ${loc.x},${loc.y},${loc.z}`);
     } catch (e) {
-      this.log('[sign] update_sign failed (needs protocol tuning): ' + e.message);
+      this.log('[sign] update_sign failed: ' + e.message);
       return false;
     }
-    await onceWindow(this.bot, 3000);
+    await this.pace();
     return true;
   }
 }
 
-/** Parse one grid slot into an Order, or null if it isn't an order row. */
+/** Parse a "top orders:" / "top offers:" lore block into [{price, qty, orders}].
+ *  Lines look like: "- 396.2 coins each | 71,668x in 1 order". */
+export function parseBook(lore) {
+  const out = [];
+  for (const line of lore || []) {
+    const m = line.match(/([0-9][0-9,]*\.?[0-9]*)\s*coins each\s*\|\s*([0-9][0-9,]*)x\s*(?:in|from)\s*([0-9]+)/);
+    if (m) out.push({ price: parseFloat(m[1].replace(/,/g, '')), qty: parseInt(m[2].replace(/,/g, ''), 10), orders: parseInt(m[3], 10) });
+  }
+  return out;
+}
+
+/** Parse one Your-Bazaar-Orders grid tile into an Order, or null. TUNE: the tile
+ *  name/lore format is unverified (account had 0 open orders during probing). */
 export function parseOrder(slot, name, lore) {
   let side = null;
-  if (name.startsWith(S.SIDE_BUY_PREFIX)) side = 'buy';
-  else if (name.startsWith(S.SIDE_SELL_PREFIX)) side = 'sell';
+  if (name.startsWith('buy ')) side = 'buy';
+  else if (name.startsWith('sell ')) side = 'sell';
   if (!side) return null;
-  const item = name.slice(side === 'buy' ? S.SIDE_BUY_PREFIX.length : S.SIDE_SELL_PREFIX.length).trim();
-
+  const item = name.slice(side === 'buy' ? 4 : 5).trim();
   let price = NaN, amount = 0, filledPct = 0, claimable = false;
   for (const line of lore) {
-    if (line.includes(S.LORE_CLAIM)) claimable = true;
+    if (line.includes('claim')) claimable = true;
     if (line.includes(S.LORE_PRICE)) price = num(line);
-    if (line.includes(S.LORE_AMOUNT_ORDER) || line.includes(S.LORE_AMOUNT_OFFER)) amount = Math.round(num(line));
+    if (line.includes('amount')) amount = Math.round(num(line));
     if (line.includes(S.LORE_FILLED)) {
       if (line.includes('100%')) filledPct = 100;
       else { const m = line.match(/([0-9.]+)\s*%/); if (m) filledPct = parseFloat(m[1]); }
     }
   }
-  return { side, item, tag: undefined, price, amount, filledPct, claimable, _slot: slot };
+  return { side, item, price, amount, filledPct, claimable, _slot: slot };
 }
 
 function num(line) {

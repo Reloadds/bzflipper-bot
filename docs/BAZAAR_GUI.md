@@ -41,9 +41,14 @@ product is a slot inside it. Full path to the trading interface:
 - `custom amount` — lore `buy up to <max>x.` / `click to specify!` → opens a **sign** to type qty
 - `go back`
 
-### Buy Order price screen — title `?` (TO CAPTURE)
-- Reached by picking an amount. Expected: a "match top order" / best-price option
-  and a `custom price` (→ sign). Final step is a Confirm. **Unverified — capturing next.**
+### Buy Order price screen — title `how much do you want to pay?`
+- `same as top order` — match highest buy order
+- `top order +0.1` — beat top order by 0.1 so you fill first (the undercut we want)
+- `5% of spread` — info tile (lowest sell / highest buy / spread)
+- `custom price` — lore `set the price per unit... minimum 50% of the best order.` → opens a **sign**
+- `go back`, `cancel buy order`
+- After picking a price → a **Confirm** screen (UNVERIFIED — only reachable by
+  committing; capture during a deliberate live micro-order).
 
 ### Your Bazaar Orders — title `your bazaar orders`
 - `go back` (to bazaar), `claim all coins` (lore `you don't have any coins to claim.` when none)

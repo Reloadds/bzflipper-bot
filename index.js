@@ -159,10 +159,25 @@ function start() {
       'custom_click_action', 'accept_code_of_conduct',
     ]);
     const MOVE = new Set(['position', 'look', 'position_look', 'flying']);
+    // Server-authoritative position (fix for the position-desync Watchdog flag).
+    // The tape showed the server sending us a `position` setback while we keep
+    // asserting a phantom {7.5,100,7.5} onGround:true — mineflayer's physics isn't
+    // tracking the real world, so our self-reported position diverges from the
+    // server and the movement anti-cheat rejects it. This bot never moves (it
+    // stands and drives GUIs), so we simply STOP asserting our own position: drop
+    // the periodic idle movement packets and let the server own our location.
+    // We KEEP `teleport_confirm` (acks server teleports) and `position_look` (the
+    // forced echo mineflayer sends right after a teleport) so the teleport
+    // handshake still completes — we just never volunteer a drifting position.
+    const SUPPRESS = new Set(['position', 'look', 'flying']);
     const origWrite = mc._client.write.bind(mc._client);
     mc._client.write = (name, params) => {
       if (mc._client.state === 'configuration' && !CONFIG_PACKETS.has(name)) {
         record(`xx blocked [configuration] ${name} (play packet during transfer)`);
+        return;
+      }
+      if (bot.serverAuthoritativePosition !== false && mc._client.state === 'play' && SUPPRESS.has(name)) {
+        record(`xx suppressed ${name} ${JSON.stringify(params)} (server-authoritative)`);
         return;
       }
       // For movement packets, record the actual payload so we can inspect it for
@@ -211,6 +226,15 @@ function start() {
   };
   mc._client.on('add_resource_pack', acceptPack);
   mc._client.on('resource_pack_send', acceptPack);
+
+  // DIAG: position-desync detector. Log every server-sent position (a teleport or
+  // anti-cheat SETBACK) with coordinates + relative-flags, so we can see how far
+  // the server thinks we are from the {7.5,100,7.5} we keep claiming. A big
+  // absolute jump = real setback = confirmed desync driving the Watchdog flag.
+  mc._client.on('position', (p) => {
+    const flags = typeof p.flags === 'object' ? p.flags : { bitmask: p.flags };
+    console.log(`  [SRV-POS] server placed us at x=${p.x} y=${p.y} z=${p.z} yaw=${p.yaw} pitch=${p.pitch} flags=${JSON.stringify(flags)}`);
+  });
 
   // mineflayer's scoreboard plugin predates 1.20.3: `scoreboard_score` no longer
   // carries an `action` field (removals moved to the separate `reset_score`
@@ -274,6 +298,18 @@ function start() {
     if (bot.viewer) await startViewer(mc);
 
     await joinSkyblockIsland(mc);
+
+    // DIAG: is the world actually loaded under us? If blockAt is NULL the island
+    // chunk never parsed on 1.21.11 → mineflayer physics is frozen → we hover at a
+    // phantom position the server rejects. If there's air (not solid) below us,
+    // we're floating and the server sees a fly hack. This one line tells us which.
+    setTimeout(() => {
+      const e = mc.entity; if (!e) return;
+      const at = mc.blockAt(e.position);
+      const below = mc.blockAt(e.position.offset(0, -1, 0));
+      const cols = Object.keys(mc.world?.columns || mc._chunkColumns || {}).length;
+      console.log(`  [WORLD] pos=${e.position.x.toFixed(2)},${e.position.y.toFixed(2)},${e.position.z.toFixed(2)} onGround=${e.onGround} blockAt=${at ? at.name : 'NULL (chunk not loaded)'} below=${below ? below.name : 'NULL'} loadedColumns=${cols}`);
+    }, 6000);
 
     // Optional idle head-look presence (rotation packets only — never flagged).
     if (bot.humanize) {

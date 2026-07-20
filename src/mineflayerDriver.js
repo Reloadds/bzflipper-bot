@@ -10,7 +10,7 @@
 
 import {
   readWindow, findSlot, itemLore, scoreboardLines, tablistFooter,
-  onceWindow, waitTicks, componentText,
+  onceWindow, componentText,
 } from './gui.js';
 import { norm } from './bazaarApi.js';
 
@@ -268,27 +268,43 @@ export class MineflayerDriver {
     return findSlot(this._win(), S.CREATE_BUY_ORDER) >= 0 || findSlot(this._win(), S.CREATE_SELL_OFFER) >= 0;
   }
 
-  /** Amount screen (buy: "how many do you want?"; sell may differ): type an exact
-   *  quantity via the sign. Adapts by BUTTON name, not title, so the sell flow
-   *  (unverified screen titles) still works — the title is only logged. */
+  /** Amount screen ("how many do you want?"): type the quantity via the sign, then
+   *  VERIFY the screen actually advanced. Matches by button so the sell flow works;
+   *  aborts cleanly (no retry-spam) if the button is absent or the sign didn't land. */
   async _enterAmount(units) {
-    const t = this._title();
-    if (!t.includes(S.AMOUNT_TITLE)) this.log(`[amount] screen "${t}" — proceeding by "custom amount" button`);
-    if (!(await this._clickName(S.CUSTOM_AMOUNT))) { this.log(`[amount] no "custom amount" on "${t}"`); return false; }
-    if (!(await this._sign(String(Math.max(1, Math.round(units)))))) return false;
+    if (findSlot(this._win(), S.CUSTOM_AMOUNT) < 0) {
+      this.log(`[amount] "custom amount" not on "${this._title()}" — aborting`); return false;
+    }
+    if (!(await this._openSign(S.CUSTOM_AMOUNT, String(Math.max(1, Math.round(units)))))) return false;
     await onceWindow(this.bot, 4000); await this.pace();
-    return true; // next screen is the price screen
+    if (this._title().includes(S.AMOUNT_TITLE)) { // still on the amount screen → sign didn't land
+      this.log('[amount] sign did not advance to the price screen — aborting'); return false;
+    }
+    return true;
   }
 
-  /** Price screen (buy: "how much do you want to pay?"; sell differs): type an
-   *  exact price via the sign. Adapts by "custom price" button, title logged. */
+  /** Price screen ("how much do you want to pay?" / "at what price are you
+   *  selling?"): type the price via the sign, then VERIFY we reached the Confirm
+   *  screen. Aborts cleanly otherwise. */
   async _enterPrice(price) {
-    const t = this._title();
-    if (!t.includes(S.PRICE_TITLE)) this.log(`[price] screen "${t}" — proceeding by "custom price" button`);
-    if (!(await this._clickName(S.CUSTOM_PRICE))) { this.log(`[price] no "custom price" on "${t}"`); return false; }
-    if (!(await this._sign(price.toFixed(1)))) return false;
+    if (findSlot(this._win(), S.CUSTOM_PRICE) < 0) {
+      this.log(`[price] "custom price" not on "${this._title()}" — aborting`); return false;
+    }
+    if (!(await this._openSign(S.CUSTOM_PRICE, price.toFixed(1)))) return false;
     await onceWindow(this.bot, 4000); await this.pace();
-    return true; // now on the confirm screen
+    if (!this._title().startsWith('confirm')) { // confirm screens are titled "confirm …"
+      this.log(`[price] sign did not reach the confirm screen (on "${this._title()}") — aborting`); return false;
+    }
+    return true;
+  }
+
+  /** Click a "custom …" tile and type into the sign it opens — resetting the
+   *  captured location first so _sign waits for THIS editor to open (writing before
+   *  the server opens the editor is silently ignored, which stalled the flow). */
+  async _openSign(button, text) {
+    this._signLoc = null; // expect a fresh open_sign_entity from this click
+    if (!(await this._clickName(button))) return false;
+    return this._sign(text);
   }
 
   /** Confirm screen (title "confirm buy order" / "confirm sell offer"). VERIFIED:
@@ -314,9 +330,13 @@ export class MineflayerDriver {
   /** Type text into the sign editor Hypixel opens for custom amount/price. Uses
    *  the location captured from open_sign_entity. Fields per 1.21.11 update_sign. */
   async _sign(text) {
-    await waitTicks(this.bot, 6); // let the sign editor open + location arrive
-    const loc = this._signLoc ?? this.bot.entity?.position?.offset(0, 1, 0);
-    if (!loc) { this.log('[sign] no sign location captured'); return false; }
+    // Wait for the server to actually OPEN the sign editor (open_sign_entity sets
+    // _signLoc). Writing before that is silently dropped — the flow then stalls on
+    // the same screen. Poll up to ~1.6s for the fresh location.
+    const t0 = Date.now();
+    while (this._signLoc == null && Date.now() - t0 < 1600) await sleep(80);
+    const loc = this._signLoc;
+    if (!loc) { this.log('[sign] sign editor never opened (timeout) — aborting'); return false; }
     try {
       this.bot._client.write('update_sign', {
         location: loc, isFrontText: true,

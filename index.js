@@ -58,6 +58,11 @@ const bot = {
   // structure (titles/slots/lore) so the S-table string anchors can be verified.
   // Enable via config ("guiProbe": true) OR the `--probe` CLI flag (no JSON edit).
   guiProbe: raw.guiProbe === true || cliArgs.includes('--probe'),
+  // Item the probe clicks into for the buy/sell interface. MUST be a
+  // guaranteed-tradeable item (no skill lock) — the top-ranked flip can be
+  // locked/seasonal (e.g. essences need Catacombs 20), which blocks the details
+  // page. Enchanted Cobblestone has no requirement. Override with "probeItem".
+  probeItem: raw.probeItem ?? 'Enchanted Cobblestone',
 };
 
 const fmt = (v) => {
@@ -279,9 +284,10 @@ function start() {
     if (m) console.log(`  [chat] ${m.slice(0, 200)}`);
     // The "badly behaving modifications" kick is a chat message + server transfer,
     // NOT a socket close — so the normal end-of-connection tape dump never fires
-    // for it. Dump the tape right here, the instant Hypixel flags us, so we can
-    // SEE exactly which packet(s) preceded the flag instead of guessing.
-    if (/badly behaving|blacklisted mod|sending commands too fast/i.test(m)) {
+    // for it. Dump the tape the instant Hypixel flags US. Match the exact kick
+    // phrasing only — NOT the server-wide "[WATCHDOG ANNOUNCEMENT] … Blacklisted
+    // modifications are a bannable offense!" broadcast, which is not a kick.
+    if (/detected badly behaving modifications|a kick occurred in your connection/i.test(m)) {
       dumpTape('PACKETS BEFORE WATCHDOG FLAG (paste this)');
     }
   });
@@ -432,9 +438,7 @@ async function probeBazaarGui(mc, api, cfg) {
   // the product itself is a slot inside it ("click to view details!"), so we click
   // into it to reach the details page (Buy Order / Sell Offer), then peek the Buy
   // Order setup (amount/price). We NEVER click Confirm — this places nothing.
-  await api.refresh().catch(() => {});
-  const top = rank(api.candidates, cfg)[0];
-  const itemName = top?.candidate?.displayName;
+  const itemName = bot.probeItem; // guaranteed-tradeable (see config parsing)
   if (itemName) {
     const search = await openCmd('bz ' + itemName, `/bz ${itemName}  (search result)`);
     const pslot = search ? findSlot(search, itemName.toLowerCase()) : -1;

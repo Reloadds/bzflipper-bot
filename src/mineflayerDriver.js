@@ -151,12 +151,30 @@ export class MineflayerDriver {
 
   /** Open the "Your Bazaar Orders" grid fresh (verified: /bz → Manage Orders @ name). */
   async openBook() {
-    if (this._title().includes(S.ORDERS_TITLE)) return true;
-    if (!this._win() || !this._title().startsWith('bazaar')) await this._cmd('bz');
-    if (!(await this._clickName(S.MANAGE_ORDERS))) return false;
-    await onceWindow(this.bot, 4000);
-    await this.pace();
-    return this._title().includes(S.ORDERS_TITLE);
+    if (!this._title().includes(S.ORDERS_TITLE)) {
+      if (!this._win() || !this._title().startsWith('bazaar')) await this._cmd('bz');
+      if (!(await this._clickName(S.MANAGE_ORDERS))) return false;
+      await onceWindow(this.bot, 4000);
+    }
+    if (!this._title().includes(S.ORDERS_TITLE)) return false;
+    await this._settleWindow(); // Hypixel streams the tiles in — wait for the full set
+    return true;
+  }
+
+  /** Wait until the order grid stops populating, so a fresh open isn't read while
+   *  Hypixel is still streaming tiles in (the cause of the dashboard "missing a few
+   *  orders" flicker). Polls the buy/sell tile count and returns once it's been
+   *  stable for a beat (or maxMs elapses). */
+  async _settleWindow(maxMs = 1800, minMs = 400) {
+    const count = () => readWindow(this._win()).filter((r) => /^(buy|sell)\s/.test(r.name)).length;
+    const t0 = Date.now();
+    let prev = -1, stableSince = Date.now();
+    while (Date.now() - t0 < maxMs) {
+      await sleep(110);
+      const n = count();
+      if (n !== prev) { prev = n; stableSince = Date.now(); }
+      if (Date.now() - stableSince >= 280 && Date.now() - t0 >= minMs) break;
+    }
   }
 
   /** Parse the "Your Bazaar Orders" grid into semantic Order rows. */
@@ -325,28 +343,37 @@ export function parseBook(lore) {
   return out;
 }
 
-/** Parse one Your-Bazaar-Orders grid tile into an Order, or null. TUNE: the tile
- *  name/lore format is unverified (account had 0 open orders during probing). */
+/** Parse one Your-Bazaar-Orders grid tile into an Order, or null. VERIFIED tile:
+ *   name "BUY <item>" / "SELL <item>"
+ *   lore "Order amount: 1x" | "Offer amount: 2x", "Price per unit: 516.5 coins",
+ *        "Filled: 2/2 100%!" (or "Filled: 1,234/5,000 24.7%"), "…to claim!" */
 export function parseOrder(slot, name, lore) {
-  let side = null;
-  if (name.startsWith('buy ')) side = 'buy';
-  else if (name.startsWith('sell ')) side = 'sell';
-  if (!side) return null;
-  const item = name.slice(side === 'buy' ? 4 : 5).trim();
-  let price = NaN, amount = 0, filledPct = 0, claimable = false;
-  for (const line of lore) {
-    if (line.includes('claim')) claimable = true;
-    if (line.includes(S.LORE_PRICE)) price = num(line);
-    if (line.includes('amount')) amount = Math.round(num(line));
-    if (line.includes(S.LORE_FILLED)) {
-      if (line.includes('100%')) filledPct = 100;
-      else { const m = line.match(/([0-9.]+)\s*%/); if (m) filledPct = parseFloat(m[1]); }
+  const m = /^\s*(buy|sell)\b\s+(.+?)\s*$/.exec(name);
+  if (!m) return null;
+  const side = m[1];
+  const item = m[2].trim();
+  const text = (lore || []).join('\n');
+
+  const pm = /price per unit:\s*([0-9][0-9,]*\.?[0-9]*)/.exec(text);
+  const price = pm ? parseFloat(pm[1].replace(/,/g, '')) : NaN;
+
+  const am = /(?:order|offer)\s+amount:\s*([0-9][0-9,]*)/.exec(text);
+  const amount = am ? parseInt(am[1].replace(/,/g, ''), 10) : 0;
+
+  // Filled: prefer an explicit "…NN%", else derive from the "filled A/B" ratio.
+  let filledPct = 0;
+  const pct = /filled:[^%\n]*?([0-9]+(?:\.[0-9]+)?)\s*%/.exec(text);
+  if (pct) filledPct = parseFloat(pct[1]);
+  else {
+    const ratio = /filled:\s*([0-9][0-9,]*)\s*\/\s*([0-9][0-9,]*)/.exec(text);
+    if (ratio) {
+      const a = parseInt(ratio[1].replace(/,/g, ''), 10);
+      const b = parseInt(ratio[2].replace(/,/g, ''), 10);
+      if (b > 0) filledPct = Math.min(100, (a / b) * 100);
     }
   }
-  return { side, item, price, amount, filledPct, claimable, _slot: slot };
-}
 
-function num(line) {
-  const m = line.replace(/,/g, '').match(/([0-9]+(?:\.[0-9]+)?)/);
-  return m ? parseFloat(m[1]) : NaN;
+  const claimable = /to claim/.test(text);
+  const expired = /expired|cancell?ed/.test(text);
+  return { side, item, price, amount, filledPct, claimable, expired, _slot: slot };
 }

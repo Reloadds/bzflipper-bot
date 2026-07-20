@@ -28,6 +28,13 @@ export const defaultConfig = {
   maxUnitsPerOrder: 71_680, // Bazaar's own limit
   kellyFraction: 0.25,
   coinReserve: 0,
+
+  // Items to NEVER trade (display names, matched via norm). Seed this with things
+  // your account can't trade — e.g. skill-locked essences ("Undead Essence" needs
+  // Catacombs 20). The driver ALSO learns locks at runtime (it refuses any product
+  // whose tile says "you must have …") and skips them thereafter, so this is just
+  // the proactive seed. Example: ["Undead Essence", "Wither Essence"].
+  avoidItems: [],
 };
 
 export function makeConfig(overrides = {}) {

@@ -12,6 +12,7 @@ import {
   readWindow, findSlot, itemLore, scoreboardLines, tablistFooter,
   onceWindow, waitTicks, componentText,
 } from './gui.js';
+import { norm } from './bazaarApi.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -80,6 +81,11 @@ export class MineflayerDriver {
     // order — _confirm dumps the confirm screen and stops. armConfirm(true) is
     // required for an order to actually be committed.
     this._armed = false;
+
+    // Runtime-learned set of item keys this account CANNOT trade — populated when
+    // _navigateTo sees a "you must have <skill> <n>!" tile. The brain reads this
+    // (via brainState) and never picks a learned-locked item again.
+    this.locked = new Set();
   }
 
   armConfirm(v) { this._armed = !!v; }
@@ -232,7 +238,11 @@ export class MineflayerDriver {
     const slot = findSlot(search, item.toLowerCase());
     if (slot < 0) { this.log(`[nav] "${item}" not in search result`); return false; }
     const lore = itemLore(search.slots[slot]).join(' ');
-    if (lore.includes(S.LOCKED)) { this.log(`[nav] "${item}" is skill-locked — cannot trade`); return false; }
+    if (lore.includes(S.LOCKED)) {
+      this.locked.add(norm(item)); // learn it — the brain will stop picking it
+      this.log(`[nav] "${item}" is skill-locked — cannot trade (added to avoid-list)`);
+      return false;
+    }
     if (!(await this._clickSlot(slot))) return false;
     await onceWindow(this.bot, 4000); await this.pace();
     // On the details page the product's own buy/sell buttons exist.

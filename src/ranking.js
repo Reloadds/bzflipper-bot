@@ -57,11 +57,13 @@ export function scoreCandidate(c, cfg, state = {}) {
 export function rank(candidates, cfg, state = {}) {
   const now = Date.now();
   const held = state.held ?? new Set();
+  const avoid = avoidSet(cfg, state);
   const rows = candidates.map((c) => {
     const s = scoreCandidate(c, cfg, state);
     const k = key(c.displayName);
     let tag = 'ok';
-    if (held.has(k)) tag = 'held';
+    if (avoid.has(k)) tag = 'locked';           // can't trade (config seed or learned)
+    else if (held.has(k)) tag = 'held';
     else if ((state.blacklistUntil?.get(k) ?? 0) > now) tag = 'benched';
     else if ((state.efficiency?.get(k) ?? 1) < cfg.minEfficiency) tag = 'low-eff';
     return { candidate: c, ...s, state: tag };
@@ -70,13 +72,24 @@ export function rank(candidates, cfg, state = {}) {
   return rows;
 }
 
+/** Item keys we must never trade: the config seed (cfg.avoidItems) ∪ the runtime
+ *  learned locks the driver discovered (state.locked), both normalised. */
+function avoidSet(cfg, state) {
+  const s = new Set((cfg.avoidItems ?? []).map((n) => key(n)));
+  if (state.locked) for (const k of state.locked) s.add(k);
+  return s;
+}
+
 /** Best candidate we don't already hold (highest cph). Null if none. */
 export function pickNext(candidates, cfg, state = {}) {
   const held = state.held ?? new Set();
+  const avoid = avoidSet(cfg, state);
   let best = null, bestCph = -1;
   for (const c of candidates) {
-    if (held.has(key(c.displayName))) continue;
-    if ((state.efficiency?.get(key(c.displayName)) ?? 1) < cfg.minEfficiency) continue;
+    const k = key(c.displayName);
+    if (avoid.has(k)) continue;                 // untradeable — never pick
+    if (held.has(k)) continue;
+    if ((state.efficiency?.get(k) ?? 1) < cfg.minEfficiency) continue;
     const { cph } = scoreCandidate(c, cfg, state);
     if (cph > bestCph) { bestCph = cph; best = c; }
   }

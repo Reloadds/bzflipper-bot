@@ -610,7 +610,11 @@ async function observeLoop(mc, api, driver, cfg, alive) {
         grid = driver.readOrders();
         await driver.closeBook();
       }
-      const rows = rank(api.candidates, cfg).slice(0, 12);
+      // Exclude untradeable items (config avoidItems + learned skill-locks) so the
+      // displayed flips are all actionable, not padded with things we can't trade.
+      const rows = rank(api.candidates, cfg, { locked: driver.locked })
+        .filter((r) => r.state !== 'locked')
+        .slice(0, 12);
 
       console.log(`\n── ${new Date().toISOString().slice(11, 19)} · purse ${fmt(purse)} · cookie ${cookie < 0 ? '?' : Math.round(cookie / 36e5) + 'h'} · api ${api.ageSeconds()}s · orders ${grid.length}`);
       console.log('  TOP FLIPS (coins/hr):');

@@ -83,6 +83,7 @@ export class StateMachine {
       efficiency: this.efficiency, blacklistUntil: this.blacklistUntil,
       learnedCapture: this.captureEstimate() === this.cfg.captureFraction ? 0 : this.captureEstimate(),
       held: this.heldSet(),
+      locked: this.driver.locked, // runtime-learned untradeable items
     };
   }
 

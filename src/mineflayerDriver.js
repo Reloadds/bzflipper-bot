@@ -85,14 +85,23 @@ export class MineflayerDriver {
     return NaN;
   }
 
-  /** Cookie buff remaining from the tab-list footer: >0 ms, 0 expired, -1 unknown. */
+  /** Cookie buff remaining from the tab-list footer: >0 ms, 0 expired, -1 unknown.
+   *  Hypixel lays the buff out over TWO lines, not one:
+   *    "cookie buff"
+   *    "1 day, 4 hours"   <-- the time is here, on the next line
+   *  so we scan from the "cookie buff" line forward to the next blank line and
+   *  parse the duration out of that whole block. */
   readCookieRemainMs() {
     const footer = tablistFooter(this.bot);
     if (!footer.includes(S.FOOTER_COOKIE)) return -1;
-    const line = footer.split('\n').find((l) => l.includes(S.FOOTER_COOKIE)) ?? footer;
-    if (line.includes(S.COOKIE_EXPIRED)) return 0;
+    const lines = footer.split('\n').map((l) => l.trim());
+    const idx = lines.findIndex((l) => l.includes(S.FOOTER_COOKIE));
+    if (idx < 0) return -1;
+    let block = '';
+    for (let i = idx; i < lines.length && lines[i] !== ''; i++) block += ' ' + lines[i];
+    if (block.includes(S.COOKIE_EXPIRED)) return 0;
     let ms = 0;
-    for (const [, v, u] of line.matchAll(/(\d+)\s*([dhms])/g)) {
+    for (const [, v, u] of block.matchAll(/(\d+)\s*([dhms])/g)) {
       const n = parseInt(v, 10);
       ms += u === 'd' ? n * 864e5 : u === 'h' ? n * 36e5 : u === 'm' ? n * 6e4 : n * 1e3;
     }

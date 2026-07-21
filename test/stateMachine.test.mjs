@@ -68,6 +68,43 @@ test('claimable sells are NOT treated as duplicates (step 1 claims them first)',
   assert.equal(sm.driver.calls.cancel.length, 0);
 });
 
+test('full inventory does not freeze the bot in an infinite buy-claim loop', async () => {
+  // Reproduces the birries-shard freeze: a filled BUY order is "to claim" but the
+  // bag is full, so the claim can never land. The old code re-hit the same tile
+  // every tick forever. Now: the driver reports noSpace, step 1 stops hammering,
+  // and control falls through to free space instead of looping.
+  const drv = fakeDriver();
+  drv.freeInventorySlots = () => 0; // bag full
+  // Driver honours the guard: a buy claim with no space reports failure.
+  drv.claim = async function (o) {
+    this.calls.claim.push(o);
+    if (o.side === 'buy' && this.freeInventorySlots() <= 0) return { kind: 'buy', units: 0, noSpace: true };
+    return { kind: o.side, units: o.amount };
+  };
+  const stuck = { side: 'buy', item: 'Birries Shard', amount: 922, filledPct: 100, price: 2090, claimable: true };
+  drv.grid = [stuck];
+  const sm = new StateMachine(makeConfig({ cookieRefreshEnabled: false }), fakeApi, drv);
+
+  const a1 = await sm.tick();
+  const a2 = await sm.tick();
+  // It must NOT report a phantom claim success, and must not be wedged on claim.
+  assert.equal(sm.session.buysFilled, 0, 'no phantom buy claim was counted');
+  assert.notEqual(a1, 'claim-buy Birries Shard', 'did not lock onto the unclaimable tile');
+  assert.notEqual(a2, 'claim-buy Birries Shard', 'still not looping on the next tick');
+  assert.ok(sm.inventoryFullSince != null, 'flagged the full-inventory condition');
+});
+
+test('a claimable SELL is still claimed even when the bag is full (coins need no slot)', async () => {
+  const drv = fakeDriver();
+  drv.freeInventorySlots = () => 0;
+  const sell = { side: 'sell', item: 'Pest Shard', amount: 5, filledPct: 100, price: 68000, claimable: true };
+  drv.grid = [sell];
+  const sm = new StateMachine(makeConfig({ cookieRefreshEnabled: false }), fakeApi, drv);
+  const action = await sm.tick();
+  assert.equal(action, 'claim-sell Pest Shard', 'sell coins claimed despite the full bag');
+  assert.equal(sm.session.sellsFilled, 1);
+});
+
 test('cookie refresh failure backs off instead of firing every tick', async () => {
   const drv = fakeDriver({ cookieOk: false });
   drv.cookieMs = 2 * 3_600_000; // 2h left — below the 24h threshold

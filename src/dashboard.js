@@ -4,9 +4,14 @@
 
 import http from 'node:http';
 
-export function startDashboard({ port = 3000, getState, onConfig = null, onImport = null, log = () => {} }) {
+export function startDashboard({ port = 3000, getState, onConfig = null, onImport = null, onReport = null, log = () => {} }) {
   const server = http.createServer((req, res) => {
     try {
+      if (req.method === 'POST' && req.url.startsWith('/api/report')) {
+        try { const out = onReport ? onReport() : { ok: false, error: 'report not available' }; res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); }
+        catch (e) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: e.message })); }
+        return;
+      }
       if (req.method === 'POST' && req.url.startsWith('/api/config')) {
         let body = '';
         req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
@@ -127,7 +132,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   <div class="panel" style="margin-bottom:16px">
     <h2>Tuning — edit live <span id="saved" class="muted" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
     <div id="knobs" class="knobs"></div>
-    <div class="save-row"><button id="save">Save &amp; apply</button><span class="muted">applies on the next tick and persists to config.json</span></div>
+    <div class="save-row"><button id="save">Save &amp; apply</button><button id="report" style="background:var(--acc2)">Send breakdown → webhook</button><span class="muted" id="reportMsg">applies on the next tick and persists to config.json</span></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
     <h2>Import config <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— paste an MBF-style settings JSON and/or a blacklist/whitelist JSON</span></h2>
@@ -155,7 +160,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const KNOBS=[['apiMinMargin','Min margin (frac)',0.005],['apiMaxMargin','Max margin (frac)',0.01],['apiMinWeeklyVolume','Min weekly volume',10000],['minEfficiency','Min efficiency',0.05],['orderLimit','Order slots',1],['orderBudgetFraction','Budget fraction',0.05],['coinReserve','Coin reserve',1000000],['minOrderValue','Min order value',50000],['autoMarginMaxBonus','Auto-margin max +',0.005]];
+const KNOBS=[['apiMinMargin','Min margin (frac)',0.005],['apiMaxMargin','Max margin (frac)',0.01],['apiMinWeeklyVolume','Min weekly volume',10000],['minEfficiency','Min efficiency',0.05],['orderLimit','Order slots',1],['orderBudgetFraction','Budget fraction',0.05],['coinReserve','Coin reserve',1000000],['minOrderValue','Min order value',50000],['autoMarginMaxBonus','Auto-margin max +',0.005],['minProfitCoins','Min profit / order',1000],['maxProfitCoins','Max profit / order',1000000],['maxSpentPerOrder','Max spent / order',1000000],['apiMaxUnitPrice','Max unit price (buy)',1000000],['minUnitPrice','Min unit price',100],['maxSellUnitPrice','Max unit price (sell)',1000000],['minBuyVolumeHourly','Min buy vol/hr',10],['minSellVolumeHourly','Min sell vol/hr',10],['apiMaxTopGap','Manip. top-gap (frac)',0.01],['relistCooldownSeconds','Relist cooldown (s)',5],['maxRelistsPerOrder','Max relists',1],['blacklistMinutes','Bench minutes',5],['buyStallMinutes','Buy stall (min)',1]];
 let knobsBuilt=false;
 function syncKnobs(cfg){if(!cfg)return;
   if(!knobsBuilt){$('knobs').innerHTML=KNOBS.map(([k,l,s])=>'<div class="knob"><label>'+l+'</label><input data-k="'+k+'" type="number" step="'+s+'" value="'+(cfg[k]??'')+'"></div>').join('');knobsBuilt=true;return;}
@@ -204,6 +209,7 @@ async function tick(){
   syncKnobs(s.config);
 }
 $('save').onclick=saveKnobs;
+$('report').onclick=async()=>{$('reportMsg').textContent='sending…';try{const r=await(await fetch('/api/report',{method:'POST'})).json();$('reportMsg').textContent=r.ok?'breakdown sent to webhook + printed in console ✓':'report failed: '+(r.error||'?');}catch(e){$('reportMsg').textContent='report failed';}setTimeout(()=>{$('reportMsg').textContent='applies on the next tick and persists to config.json';},6000);};
 async function doImport(){
   const st=$('impSettings').value.trim(), fl=$('impFilters').value.trim();
   if(!st&&!fl){$('impMsg').textContent='paste a settings and/or blacklist JSON first';return;}

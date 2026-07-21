@@ -17,6 +17,7 @@ import { startHumanize } from './src/humanize.js';
 import { startDashboard } from './src/dashboard.js';
 import { applyImport } from './src/importConfig.js';
 import { createEngine } from './src/filterEngine.js';
+import { buildBreakdown, discordSummary } from './src/report.js';
 
 // ---- config ----
 // First non-flag arg is the config path; flags like --probe are handled separately
@@ -148,6 +149,29 @@ async function notify(content) {
   } catch { /* alerts are best-effort */ }
 }
 
+// Post the full session breakdown to the webhook as a .txt attachment plus a
+// short summary message (the report is far longer than Discord's 2000-char body
+// limit, so it rides as a file). Also prints it to the console for local copy.
+async function sendSessionReport(reason = 'session end') {
+  const session = ctx.sm?.session;
+  if (!session) return;
+  let text = '', summary = '';
+  try {
+    text = buildBreakdown(session, { title: `BZFLIPPER BREAKDOWN — ${bot.username} — ${reason}` });
+    summary = discordSummary(session);
+  } catch (e) { console.log('report build failed:', e.message); return; }
+  console.log('\n' + text + '\n');
+  if (!bot.webhookUrl) { console.log('(no webhook set — copy the breakdown above and paste it back for tuning.)'); return; }
+  try {
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify({ content: summary }));
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    form.append('files[0]', new Blob([text], { type: 'text/plain' }), `breakdown-${stamp}.txt`);
+    const res = await fetch(bot.webhookUrl, { method: 'POST', body: form });
+    console.log(res.ok ? '📤 session breakdown posted to the webhook.' : `webhook rejected the report (HTTP ${res.status}).`);
+  } catch (e) { console.log('webhook report failed:', e.message); }
+}
+
 // ---- localhost dashboard plumbing ----
 // A rolling log ring (tee console.log into it) + a shared ctx the dashboard reads.
 const startedAt = Date.now();
@@ -203,7 +227,10 @@ function coinsPerHour() {
 // Strategy knobs the dashboard may edit live. cfg is passed by reference to the
 // brain + state machine, so mutating it here takes effect on the next tick.
 const TUNABLE = ['apiMinMargin', 'apiMaxMargin', 'apiMinWeeklyVolume', 'minEfficiency',
-  'orderLimit', 'orderBudgetFraction', 'coinReserve', 'minOrderValue', 'autoMarginMaxBonus'];
+  'orderLimit', 'orderBudgetFraction', 'coinReserve', 'minOrderValue', 'autoMarginMaxBonus',
+  'minProfitCoins', 'maxProfitCoins', 'maxSpentPerOrder', 'apiMaxUnitPrice', 'minUnitPrice',
+  'maxSellUnitPrice', 'minBuyVolumeHourly', 'minSellVolumeHourly', 'apiMaxTopGap',
+  'relistCooldownSeconds', 'maxRelistsPerOrder', 'blacklistMinutes', 'buyStallMinutes'];
 function applyConfig(patch) {
   const applied = {};
   for (const k of TUNABLE) {
@@ -266,7 +293,7 @@ function importConfigLive(payload) {
   r.warnings.forEach((w) => console.log(`   ⚠ ${w}`));
   return { kind: r.kind, applied: r.strategy, warnings: r.warnings };
 }
-if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, onConfig: applyConfig, onImport: importConfigLive, log: console.log });
+if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, onConfig: applyConfig, onImport: importConfigLive, onReport: () => { sendSessionReport('dashboard button'); return { ok: true }; }, log: console.log });
 
 console.log(`bzflipper-bot — ${bot.dryRun ? 'OBSERVE (dry run — no orders)' : '\x1b[31mLIVE TRADING\x1b[0m'} — ${bot.host} as ${bot.username}`);
 
@@ -957,4 +984,19 @@ async function startViewer(mc) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Ctrl-C: emit the session breakdown (console + webhook .txt) before exiting, so
+// every session ends with a report you can paste back for config tuning. Guarded
+// so a second Ctrl-C force-quits even if the webhook POST hangs.
+let shuttingDown = false;
+process.on('SIGINT', async () => {
+  if (shuttingDown) { console.log('\nforce quit.'); process.exit(130); }
+  shuttingDown = true;
+  console.log('\n⏹  stopping — building session breakdown…');
+  const guard = setTimeout(() => process.exit(130), 12_000); // never hang on a dead webhook
+  try { await sendSessionReport('Ctrl-C'); } catch { /* best effort */ }
+  clearTimeout(guard);
+  process.exit(0);
+});
+
 start();

@@ -90,6 +90,17 @@ export class MineflayerDriver {
     // _navigateTo sees a "you must have <skill> <n>!" tile. The brain reads this
     // (via brainState) and never picks a learned-locked item again.
     this.locked = new Set();
+
+    // Recent chat ring (lowercased + timestamped). Lets a write action confirm
+    // the server's reply — e.g. a BUY claim that Hypixel refuses with "You don't
+    // have the space required to claim that!" when the inventory is full.
+    this._chat = [];
+    try {
+      bot.on('messagestr', (m) => {
+        this._chat.push({ t: Date.now(), m: String(m).toLowerCase() });
+        if (this._chat.length > 60) this._chat.shift();
+      });
+    } catch { /* no chat stream (headless/tests) — claim() falls back to the slot guard */ }
   }
 
   armConfirm(v) { this._armed = !!v; }
@@ -233,7 +244,23 @@ export class MineflayerDriver {
   }
 
   async claim(order) {
+    // A BUY claim pulls the bought goods into the player inventory, so it fails
+    // (and the tile stays "to claim") when the bag is full — the server replies
+    // "You don't have the space required to claim that!". Guard up front so we
+    // don't fire a claim that can't land, and report noSpace so the brain reacts
+    // instead of hammering the same tile forever. SELL claims are pure coins and
+    // never need a slot.
+    if (order.side === 'buy' && this.freeInventorySlots() <= 0) {
+      return { kind: 'buy', units: 0, noSpace: true };
+    }
+    const clickAt = Date.now();
     if (!(await this._clickSlot(order._slot))) return null;
+    // Only inspect chat that arrived AFTER this click (pace() gives the reply
+    // time to land), so a stale refusal from a prior attempt can't mislead us.
+    if (order.side === 'buy' &&
+        this._chat.some((c) => c.t >= clickAt && c.m.includes('space required to claim'))) {
+      return { kind: 'buy', units: 0, noSpace: true };
+    }
     const units = Math.max(1, Math.round(order.amount * Math.min(100, order.filledPct) / 100));
     return { kind: order.side, units };
   }

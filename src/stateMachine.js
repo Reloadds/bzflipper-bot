@@ -54,6 +54,12 @@ export class StateMachine {
       profit: 0, flips: 0, buysFilled: 0, sellsFilled: 0,
       claimedUnits: new Map(), claimedCost: new Map(),
       soldUnits: new Map(), soldRevenue: new Map(),
+      // Gross order flow for the end-of-session breakdown: every buy order / sell
+      // offer PLACED (units + coins), aggregated by item. Includes relists, so it
+      // shows churn — the report separates this from realized profit (claims).
+      buyOrders: new Map(), buyOrderCoins: new Map(),
+      sellOffers: new Map(), sellOfferCoins: new Map(),
+      startedAt: Date.now(),
     };
     this.lastAction = 'init';
   }
@@ -152,16 +158,29 @@ export class StateMachine {
     this.adopt(grid, t);
     this.adaptMargin(); // self-tune the margin gate toward max coins/hr
 
-    // 1) Claim anything claimable.
-    const claimable = grid.find((o) => o.claimable);
-    if (claimable) {
-      const res = await this.driver.claim(claimable);
+    // 1) Claim anything claimable — highest priority. CAVEAT: a BUY claim pulls
+    //    the bought goods into the player inventory, so it FAILS (the tile stays
+    //    "to claim") when the bag is full. Blindly re-hitting the first claimable
+    //    every tick froze the bot in an infinite claim → "no space" → claim loop
+    //    (the birries-shard incident). So claim the first order that can actually
+    //    LAND: sell claims are pure coins (always safe); buy claims need a free
+    //    inventory slot. If bought goods are stuck behind a full bag, don't
+    //    hammer — fall through so steps 2/4 free space (list held goods out of
+    //    the bag, cancel dead capital to open a slot to list into).
+    const invFree = this.driver.freeInventorySlots();
+    let bagFull = false;
+    for (const c of grid) {
+      if (!c.claimable) continue;
+      if (c.side === 'buy' && invFree <= 0) { bagFull = true; continue; }
+      const res = await this.driver.claim(c);
+      if (res && res.noSpace) { bagFull = true; continue; } // driver refused: bag full
       if (res && res.units > 0) {
-        if (res.kind === 'buy') this.onBuyClaimed(claimable, res.units, t);
-        else this.onSellClaimed(claimable, res.units, t);
+        if (res.kind === 'buy') this.onBuyClaimed(c, res.units, t);
+        else this.onSellClaimed(c, res.units, t);
       }
-      return this._done(`claim-${claimable.side} ${claimable.item}`);
+      return this._done(`claim-${c.side} ${c.item}`);
     }
+    if (bagFull) this.onInventoryFull(t);
 
     // 2) List held goods (pending sells) into a free slot.
     if (this.pendingSells.length && grid.length < this.orderLimit) {
@@ -188,6 +207,8 @@ export class StateMachine {
           const oi = this.orders.get(k) ?? this._newOrder({ item }, t);
           oi.sellPrice = price; oi.amount = units;
           this.orders.set(k, oi);
+          inc(this.session.sellOffers, k, units);
+          inc(this.session.sellOfferCoins, k, units * price);
           this.pendingSells.shift();
           this.pendingAmounts.delete(k);
           return this._done(`list-sell ${item}`);
@@ -282,8 +303,10 @@ export class StateMachine {
       }
     }
 
-    // 5) Open a new buy with the best-ranked flip we don't hold.
-    if (grid.length < this.orderLimit && purse > 0 && !Number.isNaN(purse)) {
+    // 5) Open a new buy with the best-ranked flip we don't hold. Skip while the
+    //    bag is full: a fill we can't claim just piles up more stuck goods and
+    //    re-triggers the claim jam — let steps 2/4 drain the inventory first.
+    if (grid.length < this.orderLimit && invFree > 0 && purse > 0 && !Number.isNaN(purse)) {
       const budget = this.perOrderBudget(purse, grid); // even split across free slots
       const pick = pickNext(this.api.candidates, this.cfg, this.brainState());
       if (pick && pick.ourBuyPrice() <= budget) {
@@ -319,6 +342,8 @@ export class StateMachine {
           return this._done(`skip ${pick.displayName} (profit ${Math.round(orderProfit)} out of [${minProfit},${maxProfit || '∞'}])`);
         }
         if (size.units >= 1 && await this.driver.placeBuy(pick.displayName, size.units, pick.ourBuyPrice())) {
+          inc(this.session.buyOrders, key(pick.displayName), size.units);
+          inc(this.session.buyOrderCoins, key(pick.displayName), size.units * pick.ourBuyPrice());
           const oi = this._newOrder({ item: pick.displayName, tag: pick.tag, amount: size.units }, t);
           oi.buyPrice = pick.ourBuyPrice();
           oi.quotedMargin = pick.margin(this.tax);
@@ -372,7 +397,21 @@ export class StateMachine {
     }
   }
 
+  /** Bought goods are waiting but the inventory is full. Warn at most once every
+   *  5 min (so the log/dashboard isn't spammed like the freeze was) — the tick
+   *  itself recovers by listing held goods (frees the bag) and cancelling dead
+   *  buy capital (frees an order slot to list into). */
+  onInventoryFull(t) {
+    if (this.inventoryFullSince == null) this.inventoryFullSince = t;
+    if (t >= (this._invFullWarnUntil ?? 0)) {
+      this._invFullWarnUntil = t + 5 * 60_000;
+      console.log('⚠️  inventory full — bought goods can\'t be claimed. '
+        + 'Freeing space by listing/cancelling; sell or stash items if this persists.');
+    }
+  }
+
   onBuyClaimed(order, units, t) {
+    this.inventoryFullSince = null; // a buy claim landed → the bag had room again
     const k = key(order.item);
     const oi = this.orders.get(k) ?? this._newOrder(order, t);
     if (Number.isNaN(oi.buyPrice)) oi.buyPrice = order.price;

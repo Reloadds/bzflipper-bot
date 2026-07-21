@@ -1,0 +1,46 @@
+{
+  "blacklist": [
+    "SUSPICIOUS_SCRAP",
+    "RED_GIFT",
+    "PLANT_MATTER",
+    "ENCHANTED_COAL",
+    "FARMING_FOR_DUMMIES",
+    "GRIFFIN_FEATHER",
+    "HALLOWED_SKULL",
+    "WORM_BAIT",
+    "TREASURITE",
+    "DUNG",
+    "SORROW",
+    "RUSTY_COIN",
+    "SYNTHETIC_HEART",
+    "ELECTRON_TRANSMITTER",
+    "REFINED_MINERAL",
+    "SCARF_SHARD",
+    "SHARD_KRAKEN",
+    "GLOSSY_GEMSTONE",
+    "TARANTULA_SILK",
+    "FUMING_POTATO_BOOK",
+    "SCORCHED_POWER_CRYSTAL",
+    "DIVAN_FRAGMENT",
+    "FULL_CHUM_BUCKET",
+    "ENCHANTED_PACKED_ICE",
+    "SOULFLOW",
+    "HONEY_JAR",
+    "ESSENCE_UNDEAD",
+    "ESSENCE_WITHER",
+    "ESSENCE_SPIDER",
+    "ESSENCE_DRAGON",
+    "ESSENCE_GOLD",
+    "ESSENCE_ICE",
+    "ESSENCE_CRIMSON",
+    "ESSENCE_DIAMOND"
+  ],
+  "whitelist": {
+    "PRECURSOR_GEAR": {
+      "minProfit": 50000,
+      "minPercentage": 5,
+      "maxBuyOrder": 10
+    }
+  },
+  "selectiveBuys": {}
+}

@@ -42,6 +42,25 @@ export const defaultConfig = {
   kellyFraction: 0.25,
   coinReserve: 0,
 
+  // ---- Importable filters (MBF-style; see src/importConfig.js + import/*.json) ----
+  // Blacklist/whitelist by Bazaar product ID (e.g. "ENCHANTED_COAL"), matched
+  // against FlipCandidate.tag. blacklistTags are never traded; whitelist carries
+  // per-item overrides; whitelistOnly restricts trading to whitelisted items only.
+  blacklistTags: [],            // string[] of product IDs to never trade
+  whitelist: {},                // { TAG: {minProfit, minPercentage, maxBuyOrder} }
+  whitelistOnly: false,         // true = ONLY trade whitelisted items (selectiveBuys)
+  selectiveBuys: {},            // reserved: per-item selective-buy rules (stored as-is)
+
+  // Absolute-coin gates (imported from the MBF "profit"/"price"/"purse" blocks).
+  minProfitCoins: 0,            // skip an order whose expected profit (ppu×size) is below this
+  maxProfitCoins: 0,            // 0 = off; above this an order looks like a manipulation trap
+  minUnitPrice: 0,              // skip items whose top buy order is below this (dust)
+  maxSellUnitPrice: 0,          // 0 = off; skip items whose lowest sell offer is above this
+  minBuyVolumeHourly: 0,        // min hourly volume feeding OUR buy leg (0 = off)
+  minSellVolumeHourly: 0,       // min hourly volume feeding OUR sell leg (0 = off)
+  maxSpentPerOrder: 0,          // 0 = off; hard cap on coins deployed into one order
+  blacklistMinutes: 15,         // how long a benched item stays benched
+
   // Items to NEVER trade (display names, matched via norm). Seed this with things
   // your account can't trade — e.g. skill-locked essences ("Undead Essence" needs
   // Catacombs 20). The driver ALSO learns locks at runtime (it refuses any product

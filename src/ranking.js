@@ -82,6 +82,7 @@ function avoidSet(cfg, state) {
 
 /** Best candidate we don't already hold (highest cph). Null if none. */
 export function pickNext(candidates, cfg, state = {}) {
+  const now = Date.now();
   const held = state.held ?? new Set();
   const avoid = avoidSet(cfg, state);
   let best = null, bestCph = -1;
@@ -89,6 +90,7 @@ export function pickNext(candidates, cfg, state = {}) {
     const k = key(c.displayName);
     if (avoid.has(k)) continue;                 // untradeable — never pick
     if (held.has(k)) continue;
+    if ((state.blacklistUntil?.get(k) ?? 0) > now) continue; // benched (bad item / profit gate)
     if ((state.efficiency?.get(k) ?? 1) < cfg.minEfficiency) continue;
     const { cph } = scoreCandidate(c, cfg, state);
     if (cph > bestCph) { bestCph = cph; best = c; }

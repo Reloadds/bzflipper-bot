@@ -6,7 +6,7 @@
 // State (orders, pending sells, measured fill rates, efficiency, blacklists,
 // session accounting, learned capture) lives here so the driver stays stateless.
 
-import { TICK, roundToTick, sellOfferPrice, netMarginFraction } from './priceMath.js';
+import { TICK, roundToTick, sellOfferPrice, netMarginFraction, profitPerUnit } from './priceMath.js';
 import { norm } from './bazaarApi.js';
 import { pickNext, orderSize, scoreCandidate, rank } from './ranking.js';
 
@@ -276,6 +276,19 @@ export class StateMachine {
           freeInvSlots: this.driver.freeInventorySlots(),
           stackSize: 64,
         });
+        // Absolute-coin profit gates (imported profit.min / profit.max, or a
+        // per-item whitelist minProfit). Below the floor isn't worth a slot; above
+        // the ceiling reads as a manipulation trap. Bench briefly so the next tick
+        // moves on to a different item instead of re-picking this one every pass.
+        const orderProfit = profitPerUnit(pick.topBuyOrder, pick.lowestSellOffer, this.tax) * size.units;
+        const wl = this.cfg.whitelist ? this.cfg.whitelist[pick.tag] : null;
+        const minProfit = (wl && wl.minProfit) ? wl.minProfit : (this.cfg.minProfitCoins || 0);
+        const maxProfit = this.cfg.maxProfitCoins || 0;
+        if ((minProfit > 0 && orderProfit < minProfit) || (maxProfit > 0 && orderProfit > maxProfit)) {
+          const benchMs = (this.cfg.blacklistMinutes ?? 15) * 60_000;
+          this.blacklistUntil.set(key(pick.displayName), t + benchMs);
+          return this._done(`skip ${pick.displayName} (profit ${Math.round(orderProfit)} out of [${minProfit},${maxProfit || '∞'}])`);
+        }
         if (size.units >= 1 && await this.driver.placeBuy(pick.displayName, size.units, pick.ourBuyPrice())) {
           const oi = this._newOrder({ item: pick.displayName, tag: pick.tag, amount: size.units }, t);
           oi.buyPrice = pick.ourBuyPrice();
@@ -294,7 +307,10 @@ export class StateMachine {
     const freeSlots = Math.max(1, this.orderLimit - 1 - grid.length);
     const even = spendable / freeSlots;
     const cap = spendable * clamp(this.cfg.orderBudgetFraction ?? 0.5, 0.05, 1);
-    return Math.min(even, cap);
+    let budget = Math.min(even, cap);
+    // Imported hard ceiling on coins per order (purse.maxSpentPerOrder).
+    if (this.cfg.maxSpentPerOrder > 0) budget = Math.min(budget, this.cfg.maxSpentPerOrder);
+    return budget;
   }
 
   /** Lowest price we can sell at without losing money vs what we paid. */

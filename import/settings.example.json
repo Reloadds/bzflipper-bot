@@ -1,0 +1,39 @@
+{
+  "username": "uwucane",
+  "webhook": "",
+  "detailedWebhooks": true,
+  "respectCoopOrders": true,
+  "webpage": {
+    "settings": {
+      "port": 3000,
+      "password": ""
+    }
+  },
+  "profit": {
+    "min": 12000,
+    "max": 200000000,
+    "minPercentage": 9
+  },
+  "price": {
+    "maxPricePerUnitBuy": 20000000,
+    "maxPricePerUnitSell": 50000000,
+    "minPricePerUnitBuy": 500,
+    "manipulationTriggerPercentage": 20,
+    "temporaryBlacklistDuration": 15
+  },
+  "orders": {
+    "maxBuyOrders": 6,
+    "sortBy": "coinsPerHour",
+    "relistAfterType": "orderAmount",
+    "relistAfter": 1
+  },
+  "volume": {
+    "minBuy": 60,
+    "minSell": 30
+  },
+  "purse": {
+    "minPurse": 1000000,
+    "maxSpentPerOrder": 9000000
+  },
+  "selectiveBuys": false
+}

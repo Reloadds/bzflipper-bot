@@ -112,12 +112,27 @@ export class BazaarApi {
         // Every item is quotable (used for exact undercut checks), pre-filter.
         quoteMap.set(norm(c.displayName), c);
 
+        // Imported blacklist/whitelist (by product ID). Blacklisted → never trade;
+        // whitelistOnly → trade nothing but whitelisted items.
+        if (cfg.blacklistTags?.length && cfg.blacklistTags.includes(tag)) continue;
+        const wl = cfg.whitelist ? cfg.whitelist[tag] : null;
+        if (cfg.whitelistOnly && !wl) continue;
+
         const margin = PriceMath.netMarginFraction(topBuyOrder, lowestSellOffer, cfg.taxFraction);
-        // Gate = required margin + the adaptive controller's dynamic bonus.
-        if (margin < c.requiredMargin(cfg) + this.dynMarginBonus || margin > cfg.apiMaxMargin) continue;
+        // Margin floor: whitelisted items may override the global min %. Then add
+        // the volatility premium and the adaptive controller's dynamic bonus.
+        const minMarginPct = (wl && wl.minPercentage != null) ? wl.minPercentage / 100 : cfg.apiMinMargin;
+        const requiredMargin = minMarginPct + cfg.volatilityLambda * volatility + this.dynMarginBonus;
+        if (margin < requiredMargin || margin > cfg.apiMaxMargin) continue;
         if (Math.min(buyMW, sellMW) < cfg.apiMinWeeklyVolume) continue;
+        // Per-leg hourly volume floors (imported "volume" block). buyLeg is fed by
+        // sell-side flow and vice-versa (same inversion convention as elsewhere).
+        if (cfg.minBuyVolumeHourly > 0 && sellMW / 168 < cfg.minBuyVolumeHourly) continue;
+        if (cfg.minSellVolumeHourly > 0 && buyMW / 168 < cfg.minSellVolumeHourly) continue;
         if (trend < -cfg.crashFilter) continue;
         if (cfg.apiMaxUnitPrice > 0 && topBuyOrder > cfg.apiMaxUnitPrice) continue;
+        if (cfg.minUnitPrice > 0 && topBuyOrder < cfg.minUnitPrice) continue;
+        if (cfg.maxSellUnitPrice > 0 && lowestSellOffer > cfg.maxSellUnitPrice) continue;
 
         // Anti-manipulation 1: lone-outlier top order (spoof).
         if (buyOrders.length > 1) {

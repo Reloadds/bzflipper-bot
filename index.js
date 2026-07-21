@@ -5,7 +5,7 @@
 //     the most detectable form. Use a THROWAWAY alt. OBSERVE mode (dryRun:true,
 //     the default) only reads + ranks and places nothing — start there.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import mineflayer from 'mineflayer';
 import { BazaarApi, norm } from './src/bazaarApi.js';
 import { makeConfig } from './src/config.js';
@@ -15,6 +15,7 @@ import { MineflayerDriver } from './src/mineflayerDriver.js';
 import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, scoreboardTitle, componentText, onceWindow, findSlot } from './src/gui.js';
 import { startHumanize } from './src/humanize.js';
 import { startDashboard } from './src/dashboard.js';
+import { applyImport } from './src/importConfig.js';
 
 // ---- config ----
 // First non-flag arg is the config path; flags like --probe are handled separately
@@ -89,6 +90,19 @@ const bot = {
   // mute routine chat/position spam so the diagnostic block is clean to paste.
   get oneShot() { return this.guiProbe || this.placeTest || this.cancelTest || this.cycleTest || this.cookieTest; },
 };
+
+// Boot-time config import: if import/settings.json and/or import/filters.json
+// exist, apply them on TOP of config.json (they win). This is the file-based half
+// of the importable-config system; the dashboard's Import panel is the live half.
+// Both go through the same mapper (src/importConfig.js).
+for (const p of ['./import/settings.json', './import/filters.json']) {
+  if (!existsSync(p)) continue;
+  try {
+    const r = applyImport(cfg, JSON.parse(readFileSync(p, 'utf8')), bot);
+    console.log(`⤵  imported ${p} (${r.kind}) — ${Object.keys(r.strategy).join(', ') || 'no changes'}`);
+    r.warnings.forEach((w) => console.log(`   ⚠ ${w}`));
+  } catch (e) { console.log(`import ${p} failed: ${e.message}`); }
+}
 
 const fmt = (v) => {
   if (v == null || Number.isNaN(v)) return '—';
@@ -184,7 +198,28 @@ function applyConfig(patch) {
   }
   return applied;
 }
-if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, onConfig: applyConfig, log: console.log });
+// Live config import from the dashboard's Import panel. Accepts an MBF-style
+// settings object, a blacklist/whitelist object, or a combined {settings,filters}.
+// Applies to cfg + bot, persists the mapped strategy into config.json, and mirrors
+// the raw payload to import/<kind>.json so it survives a restart consistently.
+function importConfigLive(payload) {
+  const r = applyImport(cfg, payload, bot);
+  try {
+    const raw2 = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    raw2.strategy = { ...(raw2.strategy ?? {}), ...r.strategy };
+    writeFileSync(cfgPath, JSON.stringify(raw2, null, 2) + '\n');
+  } catch (e) { console.log('import save failed:', e.message); }
+  try {
+    if (!existsSync('./import')) mkdirSync('./import');
+    const writeRaw = (name, obj) => obj && writeFileSync(`./import/${name}.json`, JSON.stringify(obj, null, 2) + '\n');
+    if (payload.settings || payload.filters) { writeRaw('settings', payload.settings); writeRaw('filters', payload.filters); }
+    else if (r.kind === 'settings' || r.kind === 'filters') writeRaw(r.kind, payload);
+  } catch (e) { console.log('import mirror failed:', e.message); }
+  console.log(`⤵  config imported (${r.kind}): ${Object.keys(r.strategy).join(', ') || 'no changes'}`);
+  r.warnings.forEach((w) => console.log(`   ⚠ ${w}`));
+  return { kind: r.kind, applied: r.strategy, warnings: r.warnings };
+}
+if (bot.dashboardPort > 0) startDashboard({ port: bot.dashboardPort, getState: dashState, onConfig: applyConfig, onImport: importConfigLive, log: console.log });
 
 console.log(`bzflipper-bot — ${bot.dryRun ? 'OBSERVE (dry run — no orders)' : '\x1b[31mLIVE TRADING\x1b[0m'} — ${bot.host} as ${bot.username}`);
 

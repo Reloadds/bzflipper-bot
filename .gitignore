@@ -9,3 +9,7 @@ nmp-cache/
 
 # local diagnostic output
 test*.txt
+
+# live imported config (may hold your webhook/password) — keep only the examples
+import/settings.json
+import/filters.json

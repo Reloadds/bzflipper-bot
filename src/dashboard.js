@@ -4,7 +4,7 @@
 
 import http from 'node:http';
 
-export function startDashboard({ port = 3000, getState, onConfig = null, log = () => {} }) {
+export function startDashboard({ port = 3000, getState, onConfig = null, onImport = null, log = () => {} }) {
   const server = http.createServer((req, res) => {
     try {
       if (req.method === 'POST' && req.url.startsWith('/api/config')) {
@@ -15,6 +15,19 @@ export function startDashboard({ port = 3000, getState, onConfig = null, log = (
             const applied = onConfig ? onConfig(JSON.parse(body || '{}')) : {};
             res.writeHead(200, { 'content-type': 'application/json' });
             res.end(JSON.stringify({ ok: true, applied }));
+          } catch (e) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: e.message })); }
+        });
+        return;
+      }
+      if (req.method === 'POST' && req.url.startsWith('/api/import')) {
+        let body = '';
+        req.on('data', (c) => { body += c; if (body.length > 5e6) req.destroy(); });
+        req.on('end', () => {
+          try {
+            if (!onImport) throw new Error('import not available');
+            const result = onImport(JSON.parse(body || '{}'));
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...result }));
           } catch (e) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: e.message })); }
         });
         return;
@@ -84,6 +97,13 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
   .save-row{padding:10px 14px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px}
   button{background:var(--acc);color:#04140a;border:none;border-radius:7px;padding:7px 14px;font-weight:700;cursor:pointer}
   button:hover{filter:brightness(1.1)}
+  .imp{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px 14px}
+  @media(max-width:820px){.imp{grid-template-columns:1fr}}
+  .impcol{display:flex;flex-direction:column;gap:4px}
+  .impcol label{font-size:11px;color:var(--dim)}
+  .impcol textarea{background:#0a0d12;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:8px;min-height:150px;resize:vertical;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
+  .filelbl{font-size:12px;color:var(--acc2);cursor:pointer}
+  .filelbl:hover{text-decoration:underline}
 </style></head><body>
 <header>
   <h1>⚡ bzflipper-bot</h1>
@@ -108,6 +128,24 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
     <h2>Tuning — edit live <span id="saved" class="muted" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
     <div id="knobs" class="knobs"></div>
     <div class="save-row"><button id="save">Save &amp; apply</button><span class="muted">applies on the next tick and persists to config.json</span></div>
+  </div>
+  <div class="panel" style="margin-bottom:16px">
+    <h2>Import config <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">— paste an MBF-style settings JSON and/or a blacklist/whitelist JSON</span></h2>
+    <div class="imp">
+      <div class="impcol">
+        <label>Settings JSON</label>
+        <textarea id="impSettings" spellcheck="false" placeholder='{ "profit": { "minPercentage": 9, ... }, "orders": { "maxBuyOrders": 6 }, ... }'></textarea>
+      </div>
+      <div class="impcol">
+        <label>Blacklist / Whitelist JSON</label>
+        <textarea id="impFilters" spellcheck="false" placeholder='{ "blacklist": ["ENCHANTED_COAL", ...], "whitelist": { "PRECURSOR_GEAR": { "minProfit": 50000 } } }'></textarea>
+      </div>
+    </div>
+    <div class="save-row">
+      <button id="impBtn">Import &amp; apply</button>
+      <label class="filelbl">Load file… <input id="impFile" type="file" accept="application/json,.json" hidden></label>
+      <span class="muted" id="impMsg">blacklist/whitelist use Bazaar product IDs (e.g. ENCHANTED_COAL). Applies live + persists.</span>
+    </div>
   </div>
   <div class="grid2">
     <div class="panel"><h2>Top flips (coins/hr)</h2><div id="flipsWrap"></div></div>
@@ -166,5 +204,24 @@ async function tick(){
   syncKnobs(s.config);
 }
 $('save').onclick=saveKnobs;
+async function doImport(){
+  const st=$('impSettings').value.trim(), fl=$('impFilters').value.trim();
+  if(!st&&!fl){$('impMsg').textContent='paste a settings and/or blacklist JSON first';return;}
+  let payload={};
+  try{ if(st)payload.settings=JSON.parse(st); if(fl)payload.filters=JSON.parse(fl); }
+  catch(e){$('impMsg').textContent='✗ invalid JSON: '+e.message;return;}
+  try{const r=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})).json();
+    if(!r.ok){$('impMsg').textContent='✗ '+r.error;return;}
+    const keys=Object.keys(r.applied||{});
+    $('impMsg').textContent='✓ imported '+keys.length+' field'+(keys.length===1?'':'s')+(r.warnings&&r.warnings.length?(' · '+r.warnings.length+' warning(s): '+r.warnings.join(' | ')):'')+' — '+new Date().toLocaleTimeString();
+    knobsBuilt=false; // rebuild knobs to reflect imported values
+  }catch(e){$('impMsg').textContent='✗ '+e.message;}}
+$('impBtn').onclick=doImport;
+$('impFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{let o;try{o=JSON.parse(rd.result);}catch(err){$('impMsg').textContent='✗ file not valid JSON';return;}
+    const isFilters=Array.isArray(o.blacklist)||o.whitelist;
+    (isFilters?$('impFilters'):$('impSettings')).value=JSON.stringify(o,null,2);
+    $('impMsg').textContent='loaded '+f.name+' into '+(isFilters?'blacklist/whitelist':'settings')+' — click Import';};
+  rd.readAsText(f);e.target.value='';};
 tick(); setInterval(tick,2000);
 </script></body></html>`;

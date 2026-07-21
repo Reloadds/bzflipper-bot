@@ -227,6 +227,21 @@ function applyConfig(patch) {
 // Applies to cfg + bot, persists the mapped strategy into config.json, and mirrors
 // the raw payload to import/<kind>.json so it survives a restart consistently.
 function importConfigLive(payload) {
+  // v2 filter-rules import (the filters.rules.json format): written straight to
+  // the canonical file and loaded — the dashboard panel accepts BOTH shapes.
+  const v2 = (payload?.version >= 2 || payload?.precedence) ? payload
+    : ((payload?.filters?.version >= 2 || payload?.filters?.precedence) ? payload.filters : null);
+  if (v2) {
+    writeFileSync('./filters.rules.json', JSON.stringify(v2, null, 2) + '\n');
+    const lr = filters.loadFile('./filters.rules.json');
+    filters.mirrorToCfg(cfg);
+    const s = filters.stats();
+    console.log(`⤵  filter rules imported (v2): ${s.black} black · ${s.white} white${s.quarantined ? ` · ${s.quarantined} quarantined` : ''}`);
+    const rest = payload === v2 ? null : { ...payload, filters: undefined };
+    const r2 = (rest && rest.settings) ? applyImport(cfg, rest, bot) : { strategy: {}, warnings: [] };
+    return { kind: 'filters-v2', applied: { filterRules: `${s.black} black / ${s.white} white`, ...r2.strategy },
+      warnings: [...lr.errors.map((e) => `rule quarantined: ${e.message}`), ...r2.warnings] };
+  }
   const r = applyImport(cfg, payload, bot);
   // Merge the freshly imported lists into the SOURCE snapshot (never the mirrored
   // cfg — that would echo file rules back in) and re-attach; onReload re-mirrors.

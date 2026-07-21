@@ -137,8 +137,8 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
         <textarea id="impSettings" spellcheck="false" placeholder='{ "profit": { "minPercentage": 9, ... }, "orders": { "maxBuyOrders": 6 }, ... }'></textarea>
       </div>
       <div class="impcol">
-        <label>Blacklist / Whitelist JSON</label>
-        <textarea id="impFilters" spellcheck="false" placeholder='{ "blacklist": ["ENCHANTED_COAL", ...], "whitelist": { "PRECURSOR_GEAR": { "minProfit": 50000 } } }'></textarea>
+        <label>Blacklist / Whitelist JSON — old MBF format OR a v2 filters.rules.json</label>
+        <textarea id="impFilters" spellcheck="false" placeholder='{ "blacklist": ["ENCHANTED_COAL", ...], "whitelist": { "PRECURSOR_GEAR": { "minProfit": 50000 } } }  — or paste a full v2 rules file'></textarea>
       </div>
     </div>
     <div class="save-row">

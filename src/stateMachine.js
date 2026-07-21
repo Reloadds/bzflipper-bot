@@ -132,13 +132,16 @@ export class StateMachine {
     const t = this.now();
     const purse = this.driver.readPurse();
 
-    // 0) Cookie refresh guard.
-    if (this.cfg.cookieRefreshEnabled !== false) {
+    // 0) Cookie refresh guard. Gated by a retry backoff so a failing refresh does
+    //    NOT monopolize every tick (it used to `return` each pass, freezing
+    //    trading while the cookie was low). On failure we back off and keep trading.
+    if (this.cfg.cookieRefreshEnabled !== false && t >= (this.cookieRetryUntil ?? 0)) {
       const remain = this.driver.readCookieRemainMs();
       const thr = (this.cfg.cookieRefreshThresholdHours ?? 24) * 3_600_000;
       if (remain >= 0 && remain <= thr) {
-        await this.driver.refreshCookie();
-        return this._done('cookie-refresh');
+        const ok = await this.driver.refreshCookie();
+        if (!ok) this.cookieRetryUntil = t + (this.cfg.cookieRetryMinutes ?? 30) * 60_000;
+        return this._done(ok ? 'cookie-refresh' : `cookie-refresh failed — backing off ${this.cfg.cookieRetryMinutes ?? 30}m`);
       }
     }
 
@@ -163,15 +166,30 @@ export class StateMachine {
     // 2) List held goods (pending sells) into a free slot.
     if (this.pendingSells.length && grid.length < this.orderLimit) {
       const item = this.pendingSells[0];
-      const units = this.pendingAmounts.get(key(item)) ?? 0;
+      const k = key(item);
+      // CONSOLIDATE: if an open sell for this item already rests in-game, cancel it
+      // and fold its unsold amount into the pending amount, so a partial buy that
+      // fills in several chunks becomes ONE combined sell offer instead of stacking
+      // a second (third, …) offer for the same item. (claimable sells are handled
+      // by step 1 first, so this only touches resting offers.)
+      const dupSell = grid.find((o) => o.side === 'sell' && key(o.item) === k && !o.claimable);
+      if (dupSell) {
+        const remaining = Math.max(0, Math.round((dupSell.amount ?? 0) * (1 - Math.min(100, dupSell.filledPct || 0) / 100)));
+        if (await this.driver.cancel(dupSell)) {
+          if (remaining > 0) inc(this.pendingAmounts, k, remaining);
+          this.orders.delete(k); // in-game record is stale until we relist the combined offer
+          return this._done(`consolidate-sell ${item} (+${remaining})`);
+        }
+      }
+      const units = this.pendingAmounts.get(k) ?? 0;
       if (units > 0) {
         const price = this.sellPriceFor(item);
         if (await this.driver.placeSell(item, units, price)) {
-          const oi = this.orders.get(key(item)) ?? this._newOrder({ item }, t);
+          const oi = this.orders.get(k) ?? this._newOrder({ item }, t);
           oi.sellPrice = price; oi.amount = units;
-          this.orders.set(key(item), oi);
+          this.orders.set(k, oi);
           this.pendingSells.shift();
-          this.pendingAmounts.delete(key(item));
+          this.pendingAmounts.delete(k);
           return this._done(`list-sell ${item}`);
         }
       } else {

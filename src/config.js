@@ -32,6 +32,14 @@ export const defaultConfig = {
   autoMarginMaxBonus: 0.08, // most it may add above apiMinMargin (0 = disabled) — mod parity
   autoMarginPeriodSeconds: 300, // how often it may step (0.5%/step, gentle) — mod parity
 
+  // Booster Cookie refresh. cookieAutoBuy OFF = only consume a cookie you already
+  // hold (never spends coins); ON = instabuy one (~12.9M) when none is held — that
+  // instabuy flow is not yet verified against the live Confirm screen. On any
+  // refresh failure the state machine backs off cookieRetryMinutes before retrying,
+  // so a low cookie never freezes trading.
+  cookieAutoBuy: false,
+  cookieRetryMinutes: 30,
+
   // Sizing (used by the driver; kept here so the brain can preview order sizes).
   orderVolumeFraction: 0.5,
   maxOrderVolumeFraction: 1.0, // when capital is idle

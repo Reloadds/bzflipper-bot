@@ -254,6 +254,14 @@ export class MineflayerDriver {
     await this.closeBook();
     let cookie = this._invItem(S.ITEM_COOKIE);
     if (!cookie) {
+      // Auto-buying a cookie spends ~12.9M via the instabuy flow, which is not yet
+      // verified against the live Confirm screen — so it's OFF by default. With no
+      // held cookie we just report and let the state machine back off; buy a
+      // Booster Cookie manually (the bot will consume it) or set cookieAutoBuy:true.
+      if (!this.cfg?.cookieAutoBuy) {
+        this.log('[cookie] none held — cookieAutoBuy is OFF; skipping. Buy a Booster Cookie manually and the bot will consume it, or set cookieAutoBuy:true to instabuy (~12.9M).');
+        return false;
+      }
       this.log('[cookie] none held — instabuying one (~12.9M)…');
       if (!(await this._buyInstantly('Booster Cookie', 1))) { this.log('[cookie] instabuy failed'); return false; }
       await sleep(2500);

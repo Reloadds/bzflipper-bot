@@ -86,7 +86,7 @@ export function mapFilters(f = {}) {
       wl[T] = {
         minProfit: numOr(o?.minProfit, 0),
         minPercentage: numOr(o?.minPercentage, null), // percent, mapped to a fraction at use-time
-        maxBuyOrder: numOr(o?.maxBuyOrder, 1),
+        maxBuyOrder: numOr(o?.maxBuyOrder, 0), // 0 = no cap — a defaulted 1 would shrink every order to a single unit
       };
     }
     strategy.whitelist = wl;

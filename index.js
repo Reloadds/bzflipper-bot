@@ -16,6 +16,7 @@ import { scoreboardLines, tablistFooter, readWindow, onSkyblock, onIsland, score
 import { startHumanize } from './src/humanize.js';
 import { startDashboard } from './src/dashboard.js';
 import { applyImport } from './src/importConfig.js';
+import { createEngine } from './src/filterEngine.js';
 
 // ---- config ----
 // First non-flag arg is the config path; flags like --probe are handled separately
@@ -104,6 +105,28 @@ for (const p of ['./import/settings.json', './import/filters.json']) {
   } catch (e) { console.log(`import ${p} failed: ${e.message}`); }
 }
 
+// Filter engine: black/white lists with match types, anti-evasion, hot-reload.
+// filters.rules.json is the canonical ruleset; cfg's legacy fields (blacklistTags
+// / whitelist / avoidItems, incl. dashboard imports above) are ingested as a
+// second source, then the merged ITEM view is mirrored back onto cfg so every
+// legacy code path stays coherent. Edits to the file apply live (watch).
+//
+// cfgFilterSrc is a SNAPSHOT taken BEFORE the first mirror — the engine's cfg
+// source must never be an object mirrorToCfg wrote to, or file rules would echo
+// back as cfg rules (file deletions would stick, whitelistOnly would latch).
+const cfgFilterSrc = {
+  blacklistTags: Array.isArray(cfg.blacklistTags) ? [...cfg.blacklistTags] : [],
+  whitelist: { ...(cfg.whitelist ?? {}) },
+  avoidItems: Array.isArray(cfg.avoidItems) ? [...cfg.avoidItems] : [],
+  whitelistOnly: cfg.whitelistOnly === true,
+};
+const filters = createEngine({ path: './filters.rules.json', cfgSource: cfgFilterSrc, mirrorTo: cfg, log: console.log, watch: true });
+filters.onReload = () => filters.mirrorToCfg(cfg); // hot-reloads + benches re-mirror
+{
+  const s = filters.stats();
+  console.log(`🛡  filters: ${s.black} blacklisted · ${s.white} whitelisted · precedence=${s.precedence}${s.whitelistOnly ? ' · WHITELIST-ONLY' : ''}${s.quarantined ? ` · ${s.quarantined} quarantined` : ''}`);
+}
+
 const fmt = (v) => {
   if (v == null || Number.isNaN(v)) return '—';
   const a = Math.abs(v);
@@ -164,6 +187,7 @@ function dashState() {
     effectiveMargin: ctx.api ? ctx.api.effectiveMinMargin() : cfg.apiMinMargin,
     marginBonus: ctx.api?.dynMarginBonus ?? 0,
     coinsPerHour: coinsPerHour(),
+    filters: (() => { try { return filters.stats(); } catch { return null; } })(),
     logs: logRing.slice(-150),
   };
 }
@@ -204,6 +228,14 @@ function applyConfig(patch) {
 // the raw payload to import/<kind>.json so it survives a restart consistently.
 function importConfigLive(payload) {
   const r = applyImport(cfg, payload, bot);
+  // Merge the freshly imported lists into the SOURCE snapshot (never the mirrored
+  // cfg — that would echo file rules back in) and re-attach; onReload re-mirrors.
+  try {
+    if (Array.isArray(r.strategy.blacklistTags)) cfgFilterSrc.blacklistTags = [...r.strategy.blacklistTags];
+    if (r.strategy.whitelist && typeof r.strategy.whitelist === 'object') cfgFilterSrc.whitelist = { ...r.strategy.whitelist };
+    if (typeof r.strategy.whitelistOnly === 'boolean') cfgFilterSrc.whitelistOnly = r.strategy.whitelistOnly;
+    filters.attachCfg(cfgFilterSrc);
+  } catch (e) { console.log('filters re-attach failed:', e.message); }
   try {
     const raw2 = JSON.parse(readFileSync(cfgPath, 'utf8'));
     raw2.strategy = { ...(raw2.strategy ?? {}), ...r.strategy };
@@ -405,6 +437,7 @@ function start() {
   });
 
   const api = new BazaarApi(cfg);
+  api.filters = filters; // rules engine replaces the legacy blacklistTags gate
   const driver = new MineflayerDriver(mc, cfg, { log: (m) => console.log(m) });
   const sm = new StateMachine(cfg, api, driver);
   let running = false;
@@ -422,6 +455,14 @@ function start() {
     // welcome spam) so the diagnostic block is clean — keep only kicks/warnings.
     const important = /detected badly behaving|a kick occurred|you must have|too fast|cannot join/i.test(m);
     if (m && (!bot.oneShot || important)) console.log(`  [chat] ${m.slice(0, 200)}`);
+    // Chat-target filter rules (log/warn/replace) — observability only; never
+    // throws, never gates gameplay.
+    try {
+      const fv = filters.checkText('chat', m);
+      if (fv.matched && fv.action !== 'allow') {
+        console.log(`  [filter] chat ${fv.action} — rule [${fv.rule.type}] "${fv.rule.pattern}"${fv.reason ? ` (${fv.reason})` : ''}`);
+      }
+    } catch { /* filter must never break chat handling */ }
     // The "badly behaving modifications" kick is a chat message + server transfer,
     // NOT a socket close — so the normal end-of-connection tape dump never fires
     // for it. Dump the tape the instant Hypixel flags US. Match the exact kick

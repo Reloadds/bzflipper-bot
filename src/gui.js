@@ -4,10 +4,28 @@
 // parsing is defensive because prismarine-item exposes it a few different ways
 // across versions and Hypixel uses custom NBT components.
 
-/** Recursively flatten a Minecraft text component (object | array | JSON string)
- *  to plain lowercased text with color codes stripped. */
+/** Unwrap prismarine-nbt {type, value} wrappers. Since 1.20.3 text components
+ *  (scoreboard title/lines, tab list, item names) arrive as NBT, not JSON —
+ *  e.g. {type:'compound', value:{text:{type:'string', value:'HYPIXEL'}}} —
+ *  which componentText would otherwise flatten to ''. */
+function unwrapNbt(x) {
+  if (x && typeof x === 'object' && typeof x.type === 'string' && x.value !== undefined) {
+    return unwrapNbt(x.value);
+  }
+  if (Array.isArray(x)) return x.map(unwrapNbt);
+  if (x && typeof x === 'object') {
+    const out = {};
+    for (const k of Object.keys(x)) out[k] = unwrapNbt(x[k]);
+    return out;
+  }
+  return x;
+}
+
+/** Recursively flatten a Minecraft text component (object | array | JSON string
+ *  | NBT-wrapped component) to plain lowercased text with color codes stripped. */
 export function componentText(x) {
   if (x == null) return '';
+  x = unwrapNbt(x);
   if (typeof x === 'string') {
     // Might itself be a JSON component string.
     const t = x.trim();
@@ -17,13 +35,16 @@ export function componentText(x) {
     return strip(x);
   }
   if (Array.isArray(x)) return x.map(componentText).join('');
-  let out = typeof x.text === 'string' ? x.text : '';
+  let out = x.text != null && typeof x.text !== 'object' ? String(x.text) : '';
   if (Array.isArray(x.extra)) out += x.extra.map(componentText).join('');
   return strip(out);
 }
 
 function strip(s) {
-  return String(s).replace(/§[0-9a-fk-or]/gi, '').toLowerCase();
+  // §. (any char), not §[0-9a-fk-or]: Hypixel names its invisible sidebar
+  // entries with NON-vanilla codes (§q, §s, §t, §u, §v …) which land in the
+  // middle of each line's text ("your isla§qnd") and break substring matching.
+  return String(s).replace(/§./g, '').toLowerCase();
 }
 
 /** Plain lowercased display name of a prismarine item (or '' if empty). */

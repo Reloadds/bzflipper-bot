@@ -1,0 +1,20 @@
+=== filters migration (MBF → v2) ===
+ported blacklist entries : 192
+duplicates collapsed     : 2  (FINE_AQUAMARINE_GEM)
+typo corrections added   : 1
+  + DIAMONG_SPREADING → added DIAMOND_SPREADING (disabled)
+whitelist entries ported : 1
+  + PRECURSOR_GEAR (minProfit=50000, minPercentage=5, maxBuyOrder=10)
+suggestion rules seeded  : 5 (all disabled)
+  ~ glob:ESSENCE_* (disabled)
+  ~ glob:GOBLIN_EGG* (disabled)
+  ~ glob:FLAWED_*_GEM (disabled)
+  ~ glob:*_GIFT (disabled)
+  ~ regex:(discord\.gg|dsc\.gg|bit\.ly)/\S+ (disabled)
+benchMinutes             : 15 (from settings.price.temporaryBlacklistDuration)
+selectiveBuys            : false
+notes:
+  · near-duplicates kept as-is: WOODEN_BAIT ↔ GOLDEN_BAIT (distance 2)
+  · near-duplicates kept as-is: ENCHANTED_LEATHER ↔ ENCHANTED_FEATHER (distance 1)
+  · near-duplicates kept as-is: HOLY_FRAGMENT ↔ OLD_FRAGMENT (distance 2)
+  · near-duplicates kept as-is: FINE_OPAL_GEM ↔ FINE_TOPAZ_GEM (distance 2)

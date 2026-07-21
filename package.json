@@ -6,7 +6,9 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "start": "node index.js",
-    "observe": "node index.js"
+    "observe": "node index.js",
+    "filter": "node tools/filter-cli.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "mineflayer": "^4.20.0"

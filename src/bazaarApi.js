@@ -64,6 +64,9 @@ export class BazaarApi {
     // config.apiMinMargin (never below your floor). Lives here (not config) so it
     // never persists; resets to 0 each run.
     this.dynMarginBonus = 0;
+    // Optional FilterEngine (src/filterEngine.js) — when set, replaces the legacy
+    // cfg.blacklistTags/whitelist gate with the full rules engine.
+    this.filters = null;
   }
 
   setMarginBonus(b) { this.dynMarginBonus = Math.max(0, b || 0); }
@@ -112,11 +115,16 @@ export class BazaarApi {
         // Every item is quotable (used for exact undercut checks), pre-filter.
         quoteMap.set(norm(c.displayName), c);
 
-        // Imported blacklist/whitelist (by product ID). Blacklisted → never trade;
-        // whitelistOnly → trade nothing but whitelisted items.
-        if (cfg.blacklistTags?.length && cfg.blacklistTags.includes(tag)) continue;
-        const wl = cfg.whitelist ? cfg.whitelist[tag] : null;
-        if (cfg.whitelistOnly && !wl) continue;
+        // Blacklist/whitelist gate. Engine path (this.filters) matches product ID
+        // AND display name with glob/regex/anti-evasion + O(1) exact lookups and
+        // handles whitelistOnly + precedence; legacy cfg path when no engine.
+        if (this.filters) {
+          if (this.filters.blocksItem(tag, ItemNames.name(tag))) continue;
+        } else {
+          if (cfg.blacklistTags?.length && cfg.blacklistTags.includes(tag)) continue;
+          if (cfg.whitelistOnly && !(cfg.whitelist && cfg.whitelist[tag])) continue;
+        }
+        const wl = this.filters?.itemMeta(tag) ?? (cfg.whitelist ? cfg.whitelist[tag] : null);
 
         const margin = PriceMath.netMarginFraction(topBuyOrder, lowestSellOffer, cfg.taxFraction);
         // Margin floor: whitelisted items may override the global min %. Then add

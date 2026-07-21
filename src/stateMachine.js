@@ -276,12 +276,23 @@ export class StateMachine {
           freeInvSlots: this.driver.freeInventorySlots(),
           stackSize: 64,
         });
+        // Whitelist per-item overrides — filter-engine meta first, cfg fallback.
+        const wl = this.api?.filters?.itemMeta?.(pick.tag)
+          ?? (this.cfg.whitelist ? this.cfg.whitelist[pick.tag] : null);
+        // maxBuyOrder (imported whitelist meta): hard cap on UNITS per buy order.
+        if (wl?.maxBuyOrder > 0 && size.units > wl.maxBuyOrder) size.units = wl.maxBuyOrder;
+        // Absolute per-order value floor (minOrderValue): a dust-sized order isn't
+        // worth burning a slot on — bench the item and move to the next pick.
+        const orderValue = pick.ourBuyPrice() * size.units;
+        if ((this.cfg.minOrderValue ?? 0) > 0 && orderValue < this.cfg.minOrderValue) {
+          this.blacklistUntil.set(key(pick.displayName), t + (this.cfg.blacklistMinutes ?? 15) * 60_000);
+          return this._done(`skip ${pick.displayName} (order value ${Math.round(orderValue)} < min ${this.cfg.minOrderValue})`);
+        }
         // Absolute-coin profit gates (imported profit.min / profit.max, or a
         // per-item whitelist minProfit). Below the floor isn't worth a slot; above
         // the ceiling reads as a manipulation trap. Bench briefly so the next tick
         // moves on to a different item instead of re-picking this one every pass.
         const orderProfit = profitPerUnit(pick.topBuyOrder, pick.lowestSellOffer, this.tax) * size.units;
-        const wl = this.cfg.whitelist ? this.cfg.whitelist[pick.tag] : null;
         const minProfit = (wl && wl.minProfit) ? wl.minProfit : (this.cfg.minProfitCoins || 0);
         const maxProfit = this.cfg.maxProfitCoins || 0;
         if ((minProfit > 0 && orderProfit < minProfit) || (maxProfit > 0 && orderProfit > maxProfit)) {

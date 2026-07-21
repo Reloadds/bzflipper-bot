@@ -82,9 +82,12 @@ const bot = {
   cycleItem: raw.cycleItem ?? 'Enchanted Cobblestone',
   cycleUnits: raw.cycleUnits ?? 1,
   cycleTimeoutMin: raw.cycleTimeoutMin ?? 15,
+  // `--cookie-test --confirm`: buy + consume a Booster Cookie once to verify the
+  // refresh flow (spends ~12.9M). Without --confirm it just reports the plan.
+  cookieTest: cliArgs.includes('--cookie-test'),
   // True when any one-shot diagnostic is requested: run only it, then exit, and
   // mute routine chat/position spam so the diagnostic block is clean to paste.
-  get oneShot() { return this.guiProbe || this.placeTest || this.cancelTest || this.cycleTest; },
+  get oneShot() { return this.guiProbe || this.placeTest || this.cancelTest || this.cycleTest || this.cookieTest; },
 };
 
 const fmt = (v) => {
@@ -455,6 +458,14 @@ function start() {
     if (bot.cycleTest) {
       try { await cycleTest(mc, api, cfg, driver, bot.placeConfirm); }
       catch (e) { console.log('  [CYCLE-TEST] error:', e.message); }
+    }
+    // One-shot cookie refresh test (buy + consume a Booster Cookie).
+    if (bot.cookieTest) {
+      console.log('\n========== COOKIE-TEST ==========');
+      console.log(`  cookie now: ${Math.round(driver.readCookieRemainMs() / 36e5)}h  ·  ${bot.placeConfirm ? '\x1b[31mARMED — will buy (~12.9M) + consume\x1b[0m' : 'DISARMED — reports only, use --confirm to run'}`);
+      try { driver.armConfirm(bot.placeConfirm); console.log('  refreshCookie →', await driver.refreshCookie()); }
+      catch (e) { console.log('  [COOKIE-TEST] error:', e.message); }
+      console.log('========== END COOKIE-TEST ==========');
     }
     // One-shot flags run their diagnostic and quit — no observe-loop spam after,
     // so the block above is the clean tail of the output, easy to copy.

@@ -9,7 +9,7 @@
 // Both are exercised (with logging) by a deliberate throwaway-alt micro-order.
 
 import {
-  readWindow, findSlot, itemLore, scoreboardLines, tablistFooter,
+  readWindow, findSlot, itemLore, itemName, scoreboardLines, tablistFooter,
   onceWindow, componentText,
 } from './gui.js';
 import { norm } from './bazaarApi.js';
@@ -55,6 +55,10 @@ export const S = {
   PURSE: 'purse',
   FOOTER_COOKIE: 'cookie buff',
   COOKIE_EXPIRED: 'not active',
+  // Booster Cookie consume (mod-verified): the item, the confirm GUI title, the button.
+  ITEM_COOKIE: 'booster cookie',
+  COOKIE_CONFIRM_TITLE: 'booster cookie',
+  CONSUME_BTN: 'consume',
 };
 
 export class MineflayerDriver {
@@ -241,9 +245,62 @@ export class MineflayerDriver {
     return ok ? { refundUnits: Math.round(order.amount * (1 - Math.min(100, order.filledPct) / 100)) } : false;
   }
 
+  /** Consume a Booster Cookie to keep the buff up. Buys one via instabuy if none
+   *  is held, then equips + right-clicks it and clicks the "consume" confirm.
+   *  VERIFIED mod strings: consume GUI title contains "booster cookie", the confirm
+   *  button contains "consume". Gated behind armConfirm() like all writes. */
   async refreshCookie() {
-    this.log('[cookie] refresh not yet wired for headless; renew manually.');
-    return false;
+    if (!this._armed) { this.log('[cookie] DISARMED — would refresh the cookie; skipping (arm with LIVE / --confirm).'); return false; }
+    await this.closeBook();
+    let cookie = this._invItem(S.ITEM_COOKIE);
+    if (!cookie) {
+      this.log('[cookie] none held — instabuying one (~12.9M)…');
+      if (!(await this._buyInstantly('Booster Cookie', 1))) { this.log('[cookie] instabuy failed'); return false; }
+      await sleep(2500);
+      cookie = this._invItem(S.ITEM_COOKIE);
+      if (!cookie) { this.log('[cookie] instabought cookie not found in inventory'); return false; }
+    }
+    try {
+      await this.closeBook();
+      await this.bot.equip(cookie, 'hand');
+      await sleep(400);
+      this.bot.activateItem(); // right-click → opens the consume-confirm GUI
+    } catch (e) { this.log('[cookie] use failed: ' + e.message); return false; }
+    await onceWindow(this.bot, 4000); await this.pace();
+    const win = this._win();
+    this.log(`[cookie] consume window "${this._title()}": ` + readWindow(win).map((r) => `${r.slot}:"${r.name}"`).join(', '));
+    if (!this._title().includes(S.COOKIE_CONFIRM_TITLE)) { this.log('[cookie] consume-confirm GUI not detected'); await this.closeBook(); return false; }
+    const hit = readWindow(win).find((r) => r.name.includes(S.CONSUME_BTN) && !r.name.includes('go back') && !r.name.includes('cancel'));
+    if (!hit) { this.log('[cookie] "consume" button not found'); await this.closeBook(); return false; }
+    await this._clickSlot(hit.slot);
+    await this.closeBook();
+    this.log('[cookie] consumed — buff should refresh');
+    return true;
+  }
+
+  _invItem(needle) {
+    const n = needle.toLowerCase();
+    return this.bot.inventory.items().find((it) => itemName(it).includes(n)) ?? null;
+  }
+
+  /** Buy-instantly N of an item (navigate → "buy instantly" → amount → confirm).
+   *  Used for the Booster Cookie. Confirm button on the instabuy screen is the same
+   *  "buy order"-style tile; logged so it can be corrected against the live GUI. */
+  async _buyInstantly(item, units) {
+    if (!(await this._navigateTo(item))) return false;
+    if (!(await this._clickName(S.BUY_INSTANTLY))) return false;
+    await onceWindow(this.bot, 4000); await this.pace();
+    // Amount screen: use a custom amount if present, else a preset closest to units.
+    if (findSlot(this._win(), S.CUSTOM_AMOUNT) >= 0) {
+      if (!(await this._enterAmount(units))) return false;
+    }
+    const win = this._win();
+    this.log(`[cookie] instabuy confirm "${this._title()}": ` + readWindow(win).map((r) => `${r.slot}:"${r.name}"`).join(', '));
+    // The confirm tile on the instabuy flow — try "buy" (buy order/buy instantly),
+    // excluding cancel/go-back. Corrected from the log if wrong.
+    const hit = readWindow(win).find((r) => /\bbuy\b/.test(r.name) && !r.name.includes('cancel') && !r.name.includes('go back') && !r.name.includes('create'));
+    if (!hit) { this.log('[cookie] instabuy confirm button not found'); return false; }
+    return this._clickSlot(hit.slot);
   }
 
   // ---------- navigation + amount/price/confirm/sign ----------

@@ -358,6 +358,18 @@
       "type": "exact",
       "target": "name",
       "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "SHARD_*",
+      "type": "glob",
+      "target": "item",
+      "reason": "blacklist ALL shards (attribute shard product IDs are SHARD_*)"
+    },
+    {
+      "pattern": "* Shard",
+      "type": "glob",
+      "target": "name",
+      "reason": "blacklist ALL shards by display name (belt-and-suspenders)"
     }
   ],
   "whitelist": [

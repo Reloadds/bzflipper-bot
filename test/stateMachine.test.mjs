@@ -68,6 +68,33 @@ test('claimable sells are NOT treated as duplicates (step 1 claims them first)',
   assert.equal(sm.driver.calls.cancel.length, 0);
 });
 
+test('sell-fail guard: an unreachable sell page is benched after 3 tries, not retried forever', async () => {
+  const drv = fakeDriver();
+  drv.placeSell = async () => false; // its sell screen is a category — always aborts
+  const sm = new StateMachine(makeConfig({ cookieRefreshEnabled: false }), fakeApi, drv);
+  sm.pendingSells = ['Condensed Lily Pad'];
+  sm.pendingAmounts.set('condensed lily pad', 5);
+  const a1 = await sm.tick(); assert.match(a1, /sell-retry .*#1/);
+  const a2 = await sm.tick(); assert.match(a2, /sell-retry .*#2/);
+  const a3 = await sm.tick(); assert.match(a3, /give-up-sell/);
+  assert.equal(sm.pendingSells.length, 0, 'dropped from the queue — no infinite loop');
+  assert.ok(sm.blacklistUntil.has('condensed lily pad'), 'item benched');
+});
+
+test('stuck-claim guard: a buy that stays claimable (bag full) benches after 3, stops hammering', async () => {
+  const drv = fakeDriver();
+  drv.freeInventorySlots = () => 5;            // reports space, but the claim never clears
+  drv.claim = async (o) => ({ kind: o.side, units: o.amount }); // "succeeds" yet tile persists
+  const stuck = { side: 'buy', item: 'Birries Shard', amount: 900, filledPct: 100, price: 2000, claimable: true };
+  const sm = new StateMachine(makeConfig({ cookieRefreshEnabled: false }), fakeApi, drv);
+  drv.grid = [stuck];
+  for (let i = 0; i < 3; i++) await sm.tick();  // 3 stuck "claims"
+  const claimsBefore = drv.calls.claim.length;
+  await sm.tick();                              // 4th: guard trips — no more claim clicks
+  assert.equal(drv.calls.claim.length, claimsBefore, 'stopped clicking the stuck claim');
+  assert.ok(sm.blacklistUntil.has('birries shard'), 'stuck item benched so it is not re-bought');
+});
+
 test('full inventory does not freeze the bot in an infinite buy-claim loop', async () => {
   // Reproduces the birries-shard freeze: a filled BUY order is "to claim" but the
   // bag is full, so the claim can never land. The old code re-hit the same tile

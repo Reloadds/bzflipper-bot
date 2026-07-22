@@ -45,6 +45,8 @@ export class StateMachine {
     this.blacklistUntil = new Map();
     this.relistCounts = new Map(); // key -> times relisted (relist-war guard)
     this.lastRelistAt = new Map(); // key -> ms of last relist (cooldown)
+    this.claimFails = new Map();   // key -> consecutive stuck-claim attempts (bag-full guard)
+    this.sellFails = new Map();    // key -> consecutive failed list-sell attempts (bad-sell-nav guard)
     this.fillObs = new Map(); // "B|key"/"S|key" -> [t, filledUnits]
     this.learnedCapture = 0;
     this.learnedCaptureN = 0;
@@ -171,15 +173,30 @@ export class StateMachine {
     let bagFull = false;
     for (const c of grid) {
       if (!c.claimable) continue;
+      const ck = key(c.item);
       if (c.side === 'buy' && invFree <= 0) { bagFull = true; continue; }
+      // Stuck-claim guard: freeInventorySlots()/the "no space" chat check can miss
+      // on Hypixel (no chunks loaded → unreliable inventory sync), so a buy "claim"
+      // can report success while the tile STAYS claimable — the birries-shard freeze
+      // (thousands of "You don't have the space required to claim that!"). If the
+      // SAME buy stays claimable across attempts, treat it as bag-full: stop
+      // hammering, bench the item so we don't re-buy it, and fall through to free
+      // space (list held / cancel dead capital).
+      if (c.side === 'buy' && (this.claimFails.get(ck) ?? 0) >= 3) {
+        bagFull = true;
+        this.blacklistUntil.set(ck, t + (this.cfg.badItemBlacklistMinutes ?? 45) * 60_000);
+        continue;
+      }
       const res = await this.driver.claim(c);
-      if (res && res.noSpace) { bagFull = true; continue; } // driver refused: bag full
+      if (res && res.noSpace) { bagFull = true; this.claimFails.set(ck, (this.claimFails.get(ck) ?? 0) + 1); continue; }
       if (res && res.units > 0) {
-        if (res.kind === 'buy') this.onBuyClaimed(c, res.units, t);
-        else this.onSellClaimed(c, res.units, t);
+        if (res.kind === 'buy') { this.onBuyClaimed(c, res.units, t); this.claimFails.set(ck, (this.claimFails.get(ck) ?? 0) + 1); }
+        else { this.onSellClaimed(c, res.units, t); this.claimFails.delete(ck); }
       }
       return this._done(`claim-${c.side} ${c.item}`);
     }
+    // Reset the stuck counter for anything no longer sitting claimable (it cleared).
+    for (const k of [...this.claimFails.keys()]) if (!grid.some((o) => o.claimable && o.side === 'buy' && key(o.item) === k)) this.claimFails.delete(k);
     if (bagFull) this.onInventoryFull(t);
 
     // 2) List held goods (pending sells) into a free slot.
@@ -211,8 +228,23 @@ export class StateMachine {
           inc(this.session.sellOfferCoins, k, units * price);
           this.pendingSells.shift();
           this.pendingAmounts.delete(k);
+          this.sellFails.delete(k);
           return this._done(`list-sell ${item}`);
         }
+        // placeSell failed (e.g. its sell page is a category — "custom price" isn't
+        // on "lily pad ➜ condensed lily pad"). Retrying the same item every tick
+        // froze the bot. After a few misses, park the held goods: bench the item,
+        // drop it from the queue, and move on so other slots keep working.
+        const fails = (this.sellFails.get(k) ?? 0) + 1;
+        this.sellFails.set(k, fails);
+        if (fails >= 3) {
+          this.blacklistUntil.set(k, t + (this.cfg.badItemBlacklistMinutes ?? 45) * 60_000);
+          this.pendingSells.shift();
+          this.pendingAmounts.delete(k);
+          this.sellFails.delete(k);
+          return this._done(`give-up-sell ${item} (can't reach its sell screen)`);
+        }
+        return this._done(`sell-retry ${item} #${fails}`);
       } else {
         this.pendingSells.shift();
       }

@@ -238,6 +238,126 @@
       "action": "log",
       "enabled": false,
       "reason": "suggestion: log link-spam in chat (log-only; enable to monitor scam links)"
+    },
+    {
+      "pattern": "Condensed Lily Pad",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Floral Gelatin",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Botroot",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Cane Knot",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Deepfries",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Cornucopia",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Plasma",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Aggourdian",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Crystalized Moonlight",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Cactus Flower",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Salted Sunflower Seeds",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Architect's First Draft",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Sludge Juice",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Carrot Zest",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Enchanted Poppy",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Birries Shard",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Azure Shard",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Lava Flame Shard",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Voracious Spider Shard",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
+    },
+    {
+      "pattern": "Ghost Shard",
+      "type": "exact",
+      "target": "name",
+      "reason": "incident 2026-07-21: illiquid/uncsellable — froze the sell/claim loop"
     }
   ],
   "whitelist": [
